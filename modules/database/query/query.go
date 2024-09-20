@@ -705,7 +705,7 @@ func (g *GoAppDB) UpdatePaymentToIncludeOrderId(paymentId primitive.ObjectID, or
 
 	defer cancel()
 
-	filter := bson.D{{Key: "_id", Value: "paymentId"}}
+	filter := bson.D{{Key: "_id", Value: paymentId}}
 
 	update := bson.D{{Key: "$set", Value: bson.D{{Key: "order_id", Value: orderId}}}}
 
@@ -717,6 +717,9 @@ func (g *GoAppDB) UpdatePaymentToIncludeOrderId(paymentId primitive.ObjectID, or
 	}
 
 	if updateDetails.MatchedCount == 0 {
+		g.App.ErrorLogger.Fatalf("No matching payment could be found. Recheck your Payload")
+		return false, err
+	} else if updateDetails.ModifiedCount == 0 {
 		g.App.ErrorLogger.Fatalf("No matching payment could be found. Recheck your Payload")
 		return false, err
 	}
@@ -955,4 +958,26 @@ func (ga *GoAppDB) AddAddress(userId primitive.ObjectID, address *model.Address)
 	}
 
 	return true, nil
+}
+
+func (ga *GoAppDB) GetAllPayments() ([]primitive.M, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var res []primitive.M
+
+	cursor, err := User(ga.DB, "payment").Find(ctx, bson.D{})
+
+	if err != nil {
+		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly : %v ", err)
+		return nil, err
+	}
+
+	if err = cursor.All(ctx, &res); err != nil {
+		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly. There is some problem in cursor : %v ", err)
+		return nil, err
+	}
+
+	return res, nil
 }

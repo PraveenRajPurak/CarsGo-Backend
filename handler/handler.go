@@ -1112,7 +1112,9 @@ func (ga *GoApp) Create_Order() gin.HandlerFunc {
 
 		ga.App.InfoLogger.Println("Order created successfully", res)
 
-		ok, err := ga.DB.UpdatePaymentToIncludeOrderId(order.TransactionID, order.ID)
+		txn_Id := res["transaction_id"].(primitive.ObjectID)
+
+		ok, err := ga.DB.UpdatePaymentToIncludeOrderId(txn_Id, order.ID)
 
 		if err != nil {
 			ga.App.ErrorLogger.Println("There is some problem in creating order : ", err)
@@ -1293,5 +1295,24 @@ func (ga *GoApp) Add_Address() gin.HandlerFunc {
 		}
 
 		ctx.JSON(http.StatusOK, gin.H{"message": "Address added successfully"})
+	}
+}
+
+func (ga *GoApp) Get_All_Payments() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+
+		payments, err := ga.DB.GetAllPayments()
+
+		if err != nil {
+			ga.App.ErrorLogger.Println("There is some problem in getting all payments : ", err)
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		if payments == nil {
+			ga.App.ErrorLogger.Println("There is some problem in getting all payments : ", err)
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{"message": "All payments fetched successfully", "data": payments})
 	}
 }

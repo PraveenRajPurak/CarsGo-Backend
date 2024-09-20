@@ -20,6 +20,7 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	router.POST("/sign-in", g.Sign_In())
 	router.POST("/get-single-product", g.Get_Single_Product())
 	router.GET("/get-all-users", g.Get_All_Users())
+	router.GET("/get-all-payments", g.Get_All_Payments())
 
 	router.POST("/sign-up-admin", g.Sign_Up_Admin())
 	router.POST("/sign-in-admin", sessions.Sessions("admin_session", adminCookieStore), g.Sign_In_Admin())

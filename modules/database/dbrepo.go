@@ -45,4 +45,5 @@ type DBRepo interface {
 	GetAllShipments() ([]primitive.M, error)
 	UpdatePaymentToIncludeOrderId(paymentId primitive.ObjectID, orderId primitive.ObjectID) (bool, error)
 	AddAddress(userId primitive.ObjectID, address *model.Address) (bool, error)
+	GetAllPayments() ([]primitive.M, error)
 }
