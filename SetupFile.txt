@@ -1,0 +1,10 @@
+How to run the project ?
+
+1. Clone the Repository.
+2. Make sure to be in the same directory as go.mod i.e., CarsGo-Backend.
+3. Run "Go mod tidy" to get all the packages used in the application.
+4. Either build an image using docker build command - "docker build -t Praveenrajprp/carsgo:{YOUR_VERSION} ." or Go to step 5. (Or Modify the dockerfile to suit your conditions)
+5. Before running to docker compose command, make sure to be in the same directory as the compose file i.e., "devopstools" directory.
+6. Run docker-compose -f connect.yaml up
+7. The container will be up and running. 
+8. Test the routes using postman. (If you don't change port in the dockerfile, then it would run on localhost:10010)
