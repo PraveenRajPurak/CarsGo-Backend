@@ -21,6 +21,7 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	router.POST("/get-single-product", g.Get_Single_Product())
 	router.GET("/get-all-users", g.Get_All_Users())
 	router.GET("/get-all-payments", g.Get_All_Payments())
+	router.GET("/view-all-products", g.ViewProducts())
 
 	router.POST("/sign-up-admin", g.Sign_Up_Admin())
 	router.POST("/sign-in-admin", sessions.Sessions("admin_session", adminCookieStore), g.Sign_In_Admin())
@@ -29,7 +30,6 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedUsers.Use(Authorisation())
 
 	protectedUsers.POST("/forgot-password", g.ForgotPasswordUser())
-	protectedUsers.GET("/view-products", g.ViewProducts())
 	protectedUsers.POST("update-email", g.Update_Email_User())
 	protectedUsers.POST("update-name", g.Update_Name_User())
 	protectedUsers.POST("update-phone", g.Update_Phone_User())
@@ -49,7 +49,6 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedAdmin.POST("forgot-password", g.ForgotPasswordAdmin())
 	protectedAdmin.POST("create-category", g.CreateCategory())
 	protectedAdmin.POST("create-product", g.InsertProducts())
-	protectedAdmin.GET("view-products", g.ViewProducts())
 	protectedAdmin.POST("update-product", g.UpdateProduct())
 	protectedAdmin.POST("toggle-stock", g.ToggleStock())
 	protectedAdmin.POST("update-email", g.Update_Email_Admin())
@@ -61,5 +60,4 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedAdmin.DELETE("delete-product/:id", g.DeleteProduct())
 	protectedAdmin.POST("payment-creation", g.Payment_Creation())
 	protectedAdmin.DELETE("delete-order/:id", g.DeleteOrder())
-
 }
