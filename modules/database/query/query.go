@@ -588,6 +588,29 @@ func (g *GoAppDB) AddToCart(userID primitive.ObjectID, cartItems *model.CartItem
 	return true, nil
 }
 
+func (g *GoAppDB) Empty_the_Cart(userID primitive.ObjectID) (bool, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+
+	defer cancel()
+
+	filter := bson.D{{Key: "_id", Value: userID}}
+
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "cart", Value: bson.A{}}}}}
+
+	updateDetails, err := User(g.DB, "user").UpdateOne(ctx, filter, update)
+
+	if err != nil {
+		g.App.ErrorLogger.Fatalf("cannot update product in the database : %v ", err)
+		return false, err
+	}
+
+	g.App.InfoLogger.Printf("Matched %v documents and updated %v documents.\n", updateDetails.MatchedCount, updateDetails.ModifiedCount)
+
+	return true, nil
+
+}
+
 func (g *GoAppDB) RemoveFromCart(userID primitive.ObjectID, productID primitive.ObjectID) (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)

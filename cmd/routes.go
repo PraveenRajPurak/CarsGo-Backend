@@ -37,6 +37,7 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedUsers.POST("add-to-wishlist", g.AddToWishList())
 	protectedUsers.POST("remove-from-wishlist", g.RemoveFromWishList())
 	protectedUsers.POST("add-to-cart", g.Add_To_Cart())
+	protectedUsers.POST("empty-cart", g.Empty_Cart())
 	protectedUsers.POST("remove-from-cart", g.Remove_From_Cart())
 	protectedUsers.POST("initialize-user", g.Initialize_User())
 	protectedUsers.POST("place-order", g.Create_Order())

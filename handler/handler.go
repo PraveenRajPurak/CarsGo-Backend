@@ -975,6 +975,27 @@ func (ga *GoApp) Add_To_Cart() gin.HandlerFunc {
 	}
 }
 
+func (ga *GoApp) Empty_Cart() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+
+		user_id := ctx.MustGet("UID").(primitive.ObjectID)
+
+		ok, err := ga.DB.Empty_the_Cart(user_id)
+
+		if err != nil {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		if !ok {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		ga.App.InfoLogger.Println("Cart emptied successfully")
+
+		ctx.JSON(http.StatusOK, gin.H{"message": "Cart emptied successfully"})
+	}
+}
+
 func (ga *GoApp) Remove_From_Cart() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 
