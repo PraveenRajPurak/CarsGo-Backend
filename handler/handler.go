@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"time"
@@ -60,6 +61,7 @@ func (ga *GoApp) Sign_Up() gin.HandlerFunc {
 		user.Orders = []primitive.ObjectID{}
 		user.Payments = []primitive.ObjectID{}
 		user.Shipments = []primitive.ObjectID{}
+		user.Wishlist = []primitive.ObjectID{}
 
 		if err != nil {
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
@@ -139,6 +141,13 @@ func (ga *GoApp) Sign_In() gin.HandlerFunc {
 					"Name":  res["name"],
 				}
 
+				cookieData.Options(sessions.Options{
+					Path:     "/",
+					HttpOnly: true,
+					Secure:   false,
+					SameSite: http.SameSiteNoneMode,
+				})
+
 				cookieData.Set("userInfo", userInfo)
 				if err := cookieData.Save(); err != nil {
 					_ = ctx.AbortWithError(http.StatusInternalServerError, err)
@@ -156,10 +165,19 @@ func (ga *GoApp) Sign_In() gin.HandlerFunc {
 
 				cookieData.Set("token", t1)
 
+				ctx.SetCookie("user_session", t1, 3600, "/", "localhost", false, true)
+
 				if err := cookieData.Save(); err != nil {
 					_ = ctx.AbortWithError(http.StatusInternalServerError, err)
 					ctx.JSON(http.StatusInternalServerError, gin.H{"message": "error while saving cookie"})
 					return
+				}
+
+				fmt.Println("We are here to check if token is actually set in cookie!")
+
+				token_set_in_cookie := cookieData.Get("token").(string)
+				if token_set_in_cookie != "" {
+					fmt.Println("Token set in cookie : ", token_set_in_cookie)
 				}
 
 				cookieData.Set("new_token", t2)
@@ -169,6 +187,8 @@ func (ga *GoApp) Sign_In() gin.HandlerFunc {
 					ctx.JSON(http.StatusInternalServerError, gin.H{"message": "error while saving cookie"})
 					return
 				}
+
+				fmt.Println("The check is complete and you can make your mind how to proceed further.")
 
 				tk := map[string]string{
 					"token":    t1,
@@ -591,6 +611,33 @@ func (g *GoApp) ViewProducts() gin.HandlerFunc {
 		}
 
 		ctx.JSON(http.StatusOK, gin.H{"data": res})
+	}
+}
+
+func (ga *GoApp) Change_Stock() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+
+		var Input struct {
+			ProductID primitive.ObjectID `json:"product_id"`
+			New_Stock int                `json:"new_stock"`
+		}
+
+		if err := ctx.ShouldBindJSON(&Input); err != nil {
+			_ = ctx.AbortWithError(http.StatusBadRequest, gin.Error{Err: err})
+		}
+
+		ok, err := ga.DB.Update_Stock(Input.ProductID, Input.New_Stock)
+
+		if err != nil {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		if !ok {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{"message": "stock updated successfully"})
+
 	}
 }
 
@@ -1026,6 +1073,29 @@ func (ga *GoApp) Remove_From_Cart() gin.HandlerFunc {
 	}
 }
 
+func (ga *GoApp) Get_User_By_Id() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+
+		user_id := ctx.MustGet("UID").(primitive.ObjectID)
+
+		fmt.Println("User id : ", user_id)
+
+		user, err := ga.DB.GetUserByID(user_id)
+
+		if err != nil {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		if user == nil {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		ga.App.InfoLogger.Println("User fetched successfully : ", user)
+
+		ctx.JSON(http.StatusOK, gin.H{"data": user, "message": "User fetched successfully"})
+	}
+}
+
 func (ga *GoApp) Get_All_Users() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 
@@ -1040,6 +1110,26 @@ func (ga *GoApp) Get_All_Users() gin.HandlerFunc {
 		}
 
 		ctx.JSON(http.StatusOK, gin.H{"data": users, "message": "Users fetched successfully"})
+	}
+}
+
+func (ga *GoApp) Get_All_Categories() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+
+		categories, err := ga.DB.GetAllCategories()
+
+		fmt.Println("Categories : ", categories)
+
+		if err != nil {
+			fmt.Println("We have reached here!")
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		if categories == nil {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{"data": categories, "message": "Categories fetched successfully"})
 	}
 }
 

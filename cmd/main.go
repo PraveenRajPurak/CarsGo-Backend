@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -12,6 +13,7 @@ import (
 	"github.com/PraveenRajPurak/CarsGo-Backend/driver"
 	"github.com/PraveenRajPurak/CarsGo-Backend/handler"
 	"github.com/PraveenRajPurak/CarsGo-Backend/modules/config"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/go-playground/validator/v10"
 	"github.com/joho/godotenv"
@@ -53,6 +55,15 @@ func main() {
 	}
 
 	webserver := gin.New()
+
+	webserver.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:5173"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	GoApp := handler.NewGoApp(&app, Client)
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/PraveenRajPurak/CarsGo-Backend/modules/auth"
@@ -23,7 +24,15 @@ func Authorisation() gin.HandlerFunc {
 
 		cookieData := sessions.Default(ctx)
 
-		accessToken := cookieData.Get("token").(string)
+		fmt.Println("Inside Authorisation middleware. Cookie Data : ", cookieData)
+
+		token_from_header := ctx.GetHeader("Authorization")
+
+		fmt.Println("Inside Authorisation middleware. Token from header : ", token_from_header)
+
+		token_from_header1 := strings.Replace(token_from_header, "Bearer ", "", 1)
+
+		accessToken := token_from_header1
 
 		if accessToken == "" {
 
@@ -31,7 +40,11 @@ func Authorisation() gin.HandlerFunc {
 			return
 		}
 
+		fmt.Println("Inside Authorisation middleware. Access Token : ", accessToken)
+
 		claims, err := auth.Parse(accessToken)
+
+		fmt.Println("Inside Authorisation middleware. Claims : ", claims)
 
 		if err != nil {
 			_ = ctx.AbortWithError(http.StatusUnauthorized, gin.Error{

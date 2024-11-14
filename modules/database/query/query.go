@@ -229,6 +229,27 @@ func (g *GoAppDB) InsertProduct(product *model.Product) (bool, int, error) {
 
 }
 
+func (g *GoAppDB) Update_Stock(id primitive.ObjectID, new_stock int) (bool, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+
+	defer cancel()
+
+	filter := bson.D{{Key: "id", Value: id}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "stock", Value: new_stock}}}}
+
+	updateResult, err := User(g.DB, "product").UpdateOne(ctx, filter, update)
+
+	if err != nil {
+		g.App.ErrorLogger.Fatalf("cannot update product's stock in the database : %v ", err)
+		return false, err
+	}
+
+	g.App.InfoLogger.Printf("Matched %v documents and updated %v documents.\n", updateResult.MatchedCount, updateResult.ModifiedCount)
+
+	return true, nil
+}
+
 func (g *GoAppDB) CreateNewPassword(email string, password string) (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
@@ -655,6 +676,29 @@ func (g *GoAppDB) GetAllUsers() ([]bson.M, error) {
 
 }
 
+func (g *GoAppDB) GetAllCategories() ([]bson.M, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var res []bson.M
+
+	cursor, err := User(g.DB, "category").Find(ctx, bson.D{})
+
+	if err != nil {
+		g.App.ErrorLogger.Fatalf("cannot execute the database query perfectly : %v ", err)
+		return nil, err
+	}
+
+	if err = cursor.All(ctx, &res); err != nil {
+		g.App.ErrorLogger.Fatalf("cannot execute the database query perfectly : %v ", err)
+		return nil, err
+	}
+
+	fmt.Println("res : ", res)
+
+	return res, nil
+}
+
 func (g *GoAppDB) InitializeUser(userId primitive.ObjectID) (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
@@ -675,6 +719,26 @@ func (g *GoAppDB) InitializeUser(userId primitive.ObjectID) (bool, error) {
 	}
 
 	return true, nil
+
+}
+
+func (g *GoAppDB) GetUserByID(userId primitive.ObjectID) (primitive.M, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.D{{Key: "_id", Value: userId}}
+
+	var res primitive.M
+
+	err := User(g.DB, "user").FindOne(ctx, filter).Decode(&res)
+
+	if err != nil {
+		g.App.ErrorLogger.Fatalf("could not fetch the user from the database : %v ", err)
+		return nil, err
+	}
+
+	return res, nil
 
 }
 

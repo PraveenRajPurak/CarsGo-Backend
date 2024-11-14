@@ -9,9 +9,11 @@ import (
 type Address struct {
 	AddressField string `json:"address_field"`
 	City         string `json:"city"`
+	State        string `json:"state"`
 	Country      string `json:"country"`
 	Pincode      string `json:"pincode"`
 }
+
 type User struct {
 	ID        primitive.ObjectID   `json:"_id" bson:"_id"`
 	Name      string               `json:"name" Usage:"required"`
@@ -74,6 +76,7 @@ type Product struct {
 	SaleStarts   time.Time          `json:"sale_starts"`
 	SaleEnds     time.Time          `json:"sale_ends"`
 	InStock      bool               `json:"in_stock" Usage:"required"`
+	Stock        int                `json:"stock" Usage:"required"`
 	SKU          string             `json:"sku" Usage:"required"`
 	Images       []string           `json:"images" Usage:"required"`
 	CreatedAt    time.Time          `json:"created_At"`
@@ -105,6 +108,7 @@ type Shipment struct {
 	ID                   primitive.ObjectID `json:"_id" bson:"_id"`
 	OrderID              primitive.ObjectID `json:"order_id" bson:"order_id"`
 	CustomerID           primitive.ObjectID `json:"customer_id" bson:"customer_id"`
+	Phone                string             `json:"phone" bson:"phone"`
 	Shipment_Company     string             `json:"shipment_company" bson:"shipment_company"`
 	Source_Location      Address            `json:"source_location" bson:"source_location"`
 	Destination_Location Address            `json:"destination_location" bson:"destination_location"`

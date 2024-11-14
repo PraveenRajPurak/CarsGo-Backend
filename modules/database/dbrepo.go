@@ -11,6 +11,7 @@ type DBRepo interface {
 	UpdateUser(userID primitive.ObjectID, tk map[string]string) (bool, error)
 	CreateNewPassword(email string, password string) (bool, error)
 	InsertProduct(product *model.Product) (bool, int, error)
+	Update_Stock(id primitive.ObjectID, new_stock int) (bool, error)
 	ViewProducts() ([]primitive.M, error)
 	CreateCategory(category *model.Category) (bool, int, error)
 	SignUpAdmin(admin *model.Admin) (bool, int, error)
@@ -47,4 +48,6 @@ type DBRepo interface {
 	UpdatePaymentToIncludeOrderId(paymentId primitive.ObjectID, orderId primitive.ObjectID) (bool, error)
 	AddAddress(userId primitive.ObjectID, address *model.Address) (bool, error)
 	GetAllPayments() ([]primitive.M, error)
+	GetAllCategories() ([]primitive.M, error)
+	GetUserByID(userId primitive.ObjectID) (primitive.M, error)
 }
