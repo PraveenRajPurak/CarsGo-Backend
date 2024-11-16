@@ -1241,6 +1241,36 @@ func (ga *GoApp) Create_Order() gin.HandlerFunc {
 	}
 }
 
+func (ga *GoApp) Get_User_Orders() gin.HandlerFunc {
+
+	return func(ctx *gin.Context) {
+
+		userId := ctx.MustGet("UID").(primitive.ObjectID)
+
+		if userId == primitive.NilObjectID {
+			ga.App.ErrorLogger.Println("There is some problem in getting user id from the param")
+		}
+
+		fmt.Println("User id : ", userId)
+
+		orders, err := ga.DB.GetUserOrders(userId)
+
+		if err != nil {
+			ga.App.ErrorLogger.Println("There is some problem in getting user orders : ", err)
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		if orders == nil {
+			ga.App.ErrorLogger.Println("There is some problem in getting user orders as orders are nil : ", err)
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		ga.App.InfoLogger.Println("Orders fetched successfully : ", orders)
+
+		ctx.JSON(http.StatusOK, gin.H{"data": orders, "message": "Orders fetched successfully"})
+	}
+}
+
 func (ga *GoApp) Get_All_Orders() gin.HandlerFunc {
 
 	return func(ctx *gin.Context) {
@@ -1254,6 +1284,7 @@ func (ga *GoApp) Get_All_Orders() gin.HandlerFunc {
 
 		if orders == nil {
 			ga.App.ErrorLogger.Println("There is some problem in getting all orders as orders are nil : ", err)
+			ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": err.Error()})
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
 		}
 

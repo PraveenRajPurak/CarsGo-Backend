@@ -46,6 +46,7 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedUsers.POST("payment-creation", g.Payment_Creation())
 	protectedUsers.POST("shipment-creation", g.Shipment_Creation())
 	protectedUsers.GET("get-user-by-id", g.Get_User_By_Id())
+	protectedUsers.GET("get-user-orders", g.Get_User_Orders())
 
 	protectedAdmin := r.Group("/admin")
 	protectedAdmin.Use(sessions.Sessions("admin_session", adminCookieStore))

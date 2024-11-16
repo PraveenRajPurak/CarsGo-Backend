@@ -50,4 +50,5 @@ type DBRepo interface {
 	GetAllPayments() ([]primitive.M, error)
 	GetAllCategories() ([]primitive.M, error)
 	GetUserByID(userId primitive.ObjectID) (primitive.M, error)
+	GetUserOrders(userId primitive.ObjectID) ([]primitive.M, error)
 }
