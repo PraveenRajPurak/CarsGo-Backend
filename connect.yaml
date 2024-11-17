@@ -7,7 +7,7 @@ services:
     volumes:
       - mongo-data:/data/db
   carsgoserver:
-    image: Praveenrajprp/carsgo:0.0.27
+    image: Praveenrajprp/carsgo:0.0.28
     restart: always
     ports:
       - "10010:10010"

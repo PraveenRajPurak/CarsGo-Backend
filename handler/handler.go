@@ -794,7 +794,7 @@ func (ga *GoApp) Sign_In_Admin() gin.HandlerFunc {
 					"session_token": t1,
 				})
 			} else {
-				ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered user detected using wrong credentials"})
+				ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered admin detected using wrong credentials"})
 				return
 			}
 		}
@@ -1278,15 +1278,16 @@ func (ga *GoApp) Get_All_Orders() gin.HandlerFunc {
 		orders, err := ga.DB.GetAllOrders()
 
 		if err != nil {
-			ga.App.ErrorLogger.Println("There is some problem in getting all orders : ", err)
+			ga.App.ErrorLogger.Println("There is some problem in getting user orders : ", err)
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
 		}
 
 		if orders == nil {
-			ga.App.ErrorLogger.Println("There is some problem in getting all orders as orders are nil : ", err)
-			ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			ga.App.ErrorLogger.Println("There is some problem in getting user orders as orders are nil : ", err)
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
 		}
+
+		ga.App.InfoLogger.Println("Orders fetched successfully : ", orders)
 
 		ctx.JSON(http.StatusOK, gin.H{"data": orders, "message": "Orders fetched successfully"})
 	}

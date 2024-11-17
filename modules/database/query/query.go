@@ -895,16 +895,49 @@ func (ga *GoAppDB) GetAllOrders() ([]primitive.M, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
-	var res []primitive.M
+	pipeline := mongo.Pipeline{
+		bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "orders"},
+			{Key: "localField", Value: "orders"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "userOrders"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$userOrders"}, {Key: "preserveNullAndEmptyArrays", Value: true}}}},
+		bson.D{{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$userOrders.order_items.orderitems"}, {Key: "preserveNullAndEmptyArrays", Value: true}}}},
+		bson.D{{Key: "$lookup", Value: bson.D{
+			{Key: "from", Value: "product"},
+			{Key: "localField", Value: "userOrders.order_items.orderitems.productid"},
+			{Key: "foreignField", Value: "_id"},
+			{Key: "as", Value: "productDetails"},
+		}}},
+		bson.D{{Key: "$unwind", Value: bson.D{{Key: "path", Value: "$productDetails"}, {Key: "preserveNullAndEmptyArrays", Value: true}}}},
+		bson.D{{Key: "$project", Value: bson.D{
+			{Key: "_id", Value: 0},
+			{Key: "productID", Value: "$productDetails._id"},
+			{Key: "productName", Value: "$productDetails.name"},
+			{Key: "price", Value: "$productDetails.saleprice"},
+			{Key: "quantity", Value: "$userOrders.order_items.orderitems.quantity"},
+			{Key: "order_amount", Value: "$userOrders.order_amount"},
+			{Key: "order_date", Value: "$userOrders.order_date"},
+			{Key: "order_status", Value: "$userOrders.order_status"},
+			{Key: "orderID", Value: "$userOrders._id"},
+			{Key: "userID", Value: "$userOrders.customer_id"},
+		}}},
+	}
 
-	cursor, err := User(ga.DB, "orders").Find(ctx, bson.D{})
+	cursor, err := User(ga.DB, "user").Aggregate(ctx, pipeline)
 
 	if err != nil {
 		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly : %v ", err)
 		return nil, err
 	}
 
-	if err = cursor.All(ctx, &res); err != nil {
+	defer cursor.Close(ctx)
+	var res []primitive.M
+
+	fmt.Printf("Pipeline execution result: %+v\n", res)
+
+	if err := cursor.All(ctx, &res); err != nil {
 		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly. There is some problem in cursor : %v ", err)
 		return nil, err
 	}
