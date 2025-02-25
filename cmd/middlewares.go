@@ -96,7 +96,7 @@ func Admin_Authorisation() gin.HandlerFunc {
 
 		fmt.Println("Inside Admin Authorisation middleware. Cookie Data : ", cookieData)
 
-		token_from_header := ctx.GetHeader("Authorization")
+		token_from_header := ctx.GetHeader("Admin_Authorization")
 
 		fmt.Println("Inside Admin Authorisation middleware. Token from header : ", token_from_header)
 
