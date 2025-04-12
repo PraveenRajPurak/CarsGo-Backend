@@ -51,4 +51,5 @@ type DBRepo interface {
 	GetAllCategories() ([]primitive.M, error)
 	GetUserByID(userId primitive.ObjectID) (primitive.M, error)
 	GetUserOrders(userId primitive.ObjectID) ([]primitive.M, error)
+	InsertMultipleProductsBulk(products []*model.Product) (int, int, error)
 }

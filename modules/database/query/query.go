@@ -229,6 +229,61 @@ func (g *GoAppDB) InsertProduct(product *model.Product) (bool, int, error) {
 
 }
 
+func (g *GoAppDB) InsertMultipleProductsBulk(products []*model.Product) (int, int, error) {
+    ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+    defer cancel()
+
+    // First check which products already exist
+    var productNames []string
+    for _, product := range products {
+        productNames = append(productNames, product.Name)
+    }
+
+    filter := bson.M{"name": bson.M{"$in": productNames}}
+    cursor, err := Product(g.DB, "product").Find(ctx, filter)
+    if err != nil {
+        g.App.ErrorLogger.Printf("Error querying existing products: %v", err)
+        return 0, 0, err
+    }
+
+    // Create a map of existing product names
+    existingProducts := make(map[string]bool)
+    var results []bson.M
+    if err = cursor.All(ctx, &results); err != nil {
+        g.App.ErrorLogger.Printf("Error processing cursor: %v", err)
+        return 0, 0, err
+    }
+    
+    for _, result := range results {
+        if name, ok := result["name"].(string); ok {
+            existingProducts[name] = true
+        }
+    }
+
+    // Prepare new products for insertion
+    var newProducts []interface{}
+    for _, product := range products {
+        if _, exists := existingProducts[product.Name]; !exists {
+            product.ID = primitive.NewObjectID()
+            product.CreatedAt, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+            product.UpdatedAt = product.CreatedAt
+            newProducts = append(newProducts, product)
+        }
+    }
+
+    // Bulk insert new products
+    if len(newProducts) > 0 {
+        result, err := Product(g.DB, "product").InsertMany(ctx, newProducts)
+        if err != nil {
+            g.App.ErrorLogger.Printf("Error bulk inserting products: %v", err)
+            return 0, len(existingProducts), err
+        }
+        return len(result.InsertedIDs), len(existingProducts), nil
+    }
+
+    return 0, len(existingProducts), nil
+}
+
 func (g *GoAppDB) Update_Stock(id primitive.ObjectID, new_stock int) (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)

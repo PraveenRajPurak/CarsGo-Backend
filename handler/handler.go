@@ -598,6 +598,50 @@ func (g *GoApp) InsertProducts() gin.HandlerFunc {
 	}
 }
 
+func (g *GoApp) InsertMultipleProducts() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var products []*model.Product
+
+		if err := ctx.ShouldBindJSON(&products); err != nil {
+			ctx.AbortWithError(http.StatusBadRequest, gin.Error{Err: err})
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Process each product
+		currentTime, _ := time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+		for i := range products {
+			products[i].CreatedAt = currentTime
+			products[i].UpdatedAt = currentTime
+
+			// Validate each product
+			if err := g.App.Validate.Struct(products[i]); err != nil {
+				if _, ok := err.(*validator.InvalidValidationError); !ok {
+					ctx.AbortWithError(http.StatusBadRequest, gin.Error{Err: err})
+					ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+					g.App.InfoLogger.Println(err)
+					return
+				}
+			}
+		}
+
+		// Insert all products
+		insertedCount, existingCount, err := g.DB.InsertMultipleProductsBulk(products)
+
+		if err != nil {
+			ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"message":  "Products processed",
+			"inserted": insertedCount,
+			"existing": existingCount,
+		})
+	}
+}
+
 func (g *GoApp) ViewProducts() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 

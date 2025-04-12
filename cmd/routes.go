@@ -54,6 +54,7 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedAdmin.POST("forgot-password", g.ForgotPasswordAdmin())
 	protectedAdmin.POST("create-category", g.CreateCategory())
 	protectedAdmin.POST("create-product", g.InsertProducts())
+	protectedAdmin.POST("create-products", g.InsertMultipleProducts())
 	protectedAdmin.POST("change-stock", g.Change_Stock())
 	protectedAdmin.POST("update-product", g.UpdateProduct())
 	protectedAdmin.POST("toggle-stock", g.ToggleStock())
