@@ -56,4 +56,14 @@ type DBRepo interface {
 	GetAllCSEs() ([]primitive.M, error)
 	GetCSEByCredentials(cseID string) (primitive.M, error)
 	UpdateCSEStatus(id primitive.ObjectID, status string) error
+	CreateChat(chat *model.Chat) (primitive.ObjectID, error)
+	UpdateOrderWithChatID(orderID primitive.ObjectID, chatID primitive.ObjectID) error
+	GetAllTheOrders() ([]primitive.M, error)
+	GetAvailableCSEs() ([]model.CSE, error)
+	AssignChatToCSE(chatID, cseID primitive.ObjectID, isActive bool) error
+	GetChatByID(chatID primitive.ObjectID) (model.Chat, error)
+	UpdateChatStatus(chatID primitive.ObjectID, status string) error
+	AddMessage(message *model.Message) (primitive.ObjectID, error)
+	GetMessagesByChat(chatID primitive.ObjectID) ([]model.Message, error)
+	UpdateChatLastMessageTime(chatID primitive.ObjectID) error
 }

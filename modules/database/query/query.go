@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type GoAppDB struct {
@@ -1293,11 +1294,274 @@ func (g *GoAppDB) UpdateCSEStatus(id primitive.ObjectID, status string) error {
 	defer cancel()
 
 	filter := bson.D{{Key: "_id", Value: id}}
-	update := bson.D{{Key: "$set", Value: bson.D{{Key: "status", Value: status },{Key: "updated_at", Value: time.Now()}}}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "status", Value: status}, {Key: "updated_at", Value: time.Now()}}}}
 
 	_, err := User(g.DB, "cses").UpdateOne(ctx, filter, update)
 	if err != nil {
 		g.App.ErrorLogger.Printf("Error updating CSE status: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (g *GoAppDB) CreateChat(chat *model.Chat) (primitive.ObjectID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	orderID := chat.OrderID
+
+	fmt.Print("Order ID: ", chat.OrderID)
+	fmt.Print("Order ID derived: ", orderID)
+
+	filter := bson.D{{Key: "_id", Value: orderID}}
+
+	var res bson.M
+	err := User(g.DB, "orders").FindOne(ctx, filter).Decode(&res)
+
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error creating order with chat ID due to order not found: %v", err)
+		return primitive.NilObjectID, err
+	}
+
+	if res["chat_id"] != nil {
+		g.App.ErrorLogger.Println("chat already exists for this order")
+		return primitive.NilObjectID, errors.New("chat already exists for this order")
+	}
+
+	chat.ID = primitive.NewObjectID()
+
+	_, err = User(g.DB, "chats").InsertOne(ctx, chat)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error creating chat: %v", err)
+		return primitive.NilObjectID, err
+	}
+
+	err = g.UpdateOrderWithChatID(orderID, chat.ID)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating order with chat ID: %v", err)
+		// We'll continue anyway since the chat was created successfully
+	}
+
+	return chat.ID, nil
+}
+
+func (g *GoAppDB) UpdateOrderWithChatID(orderID primitive.ObjectID, chatID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.D{{Key: "_id", Value: orderID}}
+	update := bson.D{
+		{Key: "$set", Value: bson.D{{Key: "chat_id", Value: chatID}, {Key: "updated_at", Value: time.Now()}}},
+	}
+
+	_, err := User(g.DB, "orders").UpdateOne(ctx, filter, update)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating order with chat ID: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (g *GoAppDB) GetAllTheOrders() ([]primitive.M, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var res []primitive.M
+
+	cursor, err := User(g.DB, "orders").Find(ctx, bson.D{})
+	if err != nil {
+		g.App.ErrorLogger.Fatalf("cannot execute the database query perfectly. There is some problem in cursor : %v ", err)
+		return nil, err
+	}
+
+	if err = cursor.All(ctx, &res); err != nil {
+		g.App.ErrorLogger.Fatalf("cannot execute the database query perfectly. There is some problem in cursor : %v ", err)
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (g *GoAppDB) GetAvailableCSEs() ([]model.CSE, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var cses []model.CSE
+
+	// Find all CSEs with status "online"
+	filter := bson.D{{Key: "status", Value: "online"}}
+
+	cursor, err := User(g.DB, "cses").Find(ctx, filter)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error finding available CSEs: %v", err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	if err = cursor.All(ctx, &cses); err != nil {
+		g.App.ErrorLogger.Printf("Error decoding CSEs: %v", err)
+		return nil, err
+	}
+
+	return cses, nil
+}
+
+func (g *GoAppDB) AssignChatToCSE(chatID, cseID primitive.ObjectID, isActive bool) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// Update chat with CSE ID and status
+	chatStatus := "active"
+	if !isActive {
+		chatStatus = "pending"
+	}
+
+	chatFilter := bson.D{{Key: "_id", Value: chatID}}
+	chatUpdate := bson.D{
+		{Key: "$set", Value: bson.D{
+			{Key: "cse_id", Value: cseID},
+			{Key: "status", Value: chatStatus},
+		}},
+	}
+
+	_, err := User(g.DB, "chats").UpdateOne(ctx, chatFilter, chatUpdate)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating chat with CSE ID: %v", err)
+		return err
+	}
+
+	// Update CSE's chat lists and counts
+	cseFilter := bson.D{{Key: "_id", Value: cseID}}
+	var cseUpdate bson.D
+
+	if isActive {
+		cseUpdate = bson.D{
+			{Key: "$push", Value: bson.D{{Key: "active_chats", Value: chatID}}},
+			{Key: "$inc", Value: bson.D{{Key: "active_chats_count", Value: 1}}},
+		}
+	} else {
+		cseUpdate = bson.D{
+			{Key: "$push", Value: bson.D{{Key: "pending_chats", Value: chatID}}},
+			{Key: "$inc", Value: bson.D{{Key: "pending_chats_count", Value: 1}}},
+		}
+	}
+
+	_, err = User(g.DB, "cses").UpdateOne(ctx, cseFilter, cseUpdate)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating CSE with chat: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (g *GoAppDB) GetChatByID(chatID primitive.ObjectID) (model.Chat, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var chat model.Chat
+
+	filter := bson.D{{Key: "_id", Value: chatID}}
+
+	err := User(g.DB, "chats").FindOne(ctx, filter).Decode(&chat)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error finding chat: %v", err)
+		return chat, err
+	}
+
+	return chat, nil
+}
+
+func (g *GoAppDB) UpdateChatStatus(chatID primitive.ObjectID, status string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.D{{Key: "_id", Value: chatID}}
+	update := bson.D{
+		{Key: "$set", Value: bson.D{{Key: "status", Value: status}}},
+	}
+
+	_, err := User(g.DB, "chats").UpdateOne(ctx, filter, update)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating chat status: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (g *GoAppDB) AddMessage(message *model.Message) (primitive.ObjectID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// Set message ID and timestamp
+	message.ID = primitive.NewObjectID()
+	message.Timestamp = time.Now()
+
+	// Insert message into database
+	_, err := User(g.DB, "messages").InsertOne(ctx, message)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error adding message: %v", err)
+		return primitive.NilObjectID, err
+	}
+
+	// Update chat with message ID and last message time
+	chatFilter := bson.D{{Key: "_id", Value: message.ChatID}}
+	chatUpdate := bson.D{
+		{Key: "$push", Value: bson.D{{Key: "messages", Value: message.ID}}},
+		{Key: "$set", Value: bson.D{{Key: "last_message_time", Value: time.Now()}}},
+	}
+
+	_, err = User(g.DB, "chats").UpdateOne(ctx, chatFilter, chatUpdate)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating chat with message: %v", err)
+		return message.ID, err // Return message ID anyway since message was created
+	}
+
+	return message.ID, nil
+}
+
+func (g *GoAppDB) GetMessagesByChat(chatID primitive.ObjectID) ([]model.Message, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var messages []model.Message
+
+	// Find all messages for this chat
+	filter := bson.D{{Key: "chat_id", Value: chatID}}
+
+	// Sort by timestamp to get messages in chronological order
+	opts := options.Find().SetSort(bson.D{{Key: "timestamp", Value: 1}})
+
+	cursor, err := User(g.DB, "messages").Find(ctx, filter, opts)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error finding messages: %v", err)
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	if err = cursor.All(ctx, &messages); err != nil {
+		g.App.ErrorLogger.Printf("Error decoding messages: %v", err)
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+func (g *GoAppDB) UpdateChatLastMessageTime(chatID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.D{{Key: "_id", Value: chatID}}
+	update := bson.D{
+		{Key: "$set", Value: bson.D{{Key: "last_message_time", Value: time.Now()}}},
+	}
+
+	_, err := User(g.DB, "chats").UpdateOne(ctx, filter, update)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating chat last message time: %v", err)
 		return err
 	}
 

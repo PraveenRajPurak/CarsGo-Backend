@@ -60,8 +60,10 @@ func Authorisation() gin.HandlerFunc {
 		filter := bson.D{{Key: "email", Value: claims.Email}}
 
 		if Client == nil {
+			fmt.Print("Inside Authorisation middleware. Client is nil")
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{
 				Err: err})
+			fmt.Print("Inside Authorisation middleware. Client is nil. Exiting")
 			return
 		}
 
@@ -138,10 +140,13 @@ func Admin_Authorisation() gin.HandlerFunc {
 		ins_err := query.User(Client, "admin").FindOne(contex, filter).Decode(&res)
 
 		if ins_err != nil {
+
 			if ins_err == mongo.ErrNoDocuments {
+				fmt.Print("Inside Admin Authorisation middleware. Ins_err phase 2 problem-no document")
 				_ = ctx.AbortWithError(http.StatusUnauthorized, errors.New("unauthorized admin"))
 				return
 			}
+			fmt.Print("Inside Admin Authorisation middleware. Ins_err phase 3 problem. Document found but still error")
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{
 				Err: ins_err,
 			})
@@ -196,21 +201,28 @@ func CSE_Authorisation() gin.HandlerFunc {
 
 		var res bson.M
 
+		fmt.Println("Inside CSE Authorisation middleware. Email that is used for validation : ", claims.Email)
+
 		filter := bson.D{{Key: "email", Value: claims.Email}}
 
 		if Client == nil {
+			fmt.Print("Inside CSE Authorisation middleware. Client is nil")
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{
 				Err: err})
+			fmt.Print("Inside CSE Authorisation middleware. Client is nil. Exiting...")
 			return
 		}
 
 		ins_err := query.User(Client, "cses").FindOne(contex, filter).Decode(&res)
 
 		if ins_err != nil {
+			fmt.Print("Inside CSE Authorisation middleware. Ins_err phase 1 problem")
 			if ins_err == mongo.ErrNoDocuments {
+				fmt.Print("Inside CSE Authorisation middleware. Ins_err phase 2 problem-no document")
 				_ = ctx.AbortWithError(http.StatusUnauthorized, errors.New("unauthorized CSE"))
 				return
 			}
+			fmt.Print("Inside CSE Authorisation middleware. Ins_err phase 3 problem. Document found but still error")
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{
 				Err: ins_err,
 			})
@@ -220,6 +232,8 @@ func CSE_Authorisation() gin.HandlerFunc {
 		ctx.Set("UID", claims.ID)
 		ctx.Set("Name", claims.Name)
 		ctx.Set("Email", claims.Email)
+
+		fmt.Print("Value successfully set in context : - ", ctx.Value("pass"), ctx.Value("UID"), ctx.Value("Name"), ctx.Value("Email"))
 
 		fmt.Println("Coming out of CSE Authorisation middleware")
 		ctx.Next()

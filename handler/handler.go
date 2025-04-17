@@ -1585,7 +1585,7 @@ func (ga *GoApp) CreateCSE() gin.HandlerFunc {
 	}
 }
 
-func (ga *GoApp) GetAllCSES() gin.HandlerFunc {
+func (ga *GoApp) GetAllCSEData() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		cses, err := ga.DB.GetAllCSEs()
 		if err != nil {
@@ -1648,7 +1648,7 @@ func (ga *GoApp) CSELogin() gin.HandlerFunc {
 				return
 			}
 
-			t1, t2, err := auth.Generate(cse.Email, id, res["name"].(string))
+			t1, t2, err := auth.Generate(res["email"].(string), id, res["name"].(string))
 
 			if err != nil {
 				_ = ctx.AbortWithError(http.StatusInternalServerError, err)
@@ -1672,12 +1672,7 @@ func (ga *GoApp) CSELogin() gin.HandlerFunc {
 				return
 			}
 
-			// tk := map[string]string{
-			// 	"token":    t1,
-			// 	"newToken": t2,
-			// }
-
-			err = ga.DB.UpdateCSEStatus(cse.ID, "online")
+			err = ga.DB.UpdateCSEStatus(id, "online")
 			if err != nil {
 				ga.App.ErrorLogger.Printf("Error updating CSE status: %v", err)
 				// Continue anyway, as login was successful
@@ -1685,12 +1680,12 @@ func (ga *GoApp) CSELogin() gin.HandlerFunc {
 
 			ctx.JSON(http.StatusOK, gin.H{
 				"message":       "Successfully Logged in",
-				"email":         cse.Email,
+				"email":         res["email"],
 				"id":            id,
 				"name":          res["name"],
 				"session_token": t1,
 				"cse_id":        cse.CseID,
-				"phone_number":  cse.PhoneNumber,
+				"phone_number":  res["phone_number"],
 			})
 		} else {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered admin detected using wrong credentials"})
@@ -1709,20 +1704,335 @@ func (ga *GoApp) CSELogout() gin.HandlerFunc {
 			return
 		}
 
-		uid := uidInterface.(string)
-		cseID, err := primitive.ObjectIDFromHex(uid)
-		if err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid CSE ID"})
-			return
-		}
+		fmt.Print("uidInterface : ", uidInterface)
 
+		uid := uidInterface.(primitive.ObjectID)
 		// Update CSE status to offline
-		err = ga.DB.UpdateCSEStatus(cseID, "offline")
+		err := ga.DB.UpdateCSEStatus(uid, "offline")
 		if err != nil {
 			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
 			return
 		}
 
 		ctx.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	}
+}
+
+func (ga *GoApp) CreateChat() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// Parse request body
+		var chat *model.Chat
+
+		err := ctx.ShouldBindJSON(&chat)
+		if err != nil {
+			_ = ctx.AbortWithError(http.StatusBadRequest, gin.Error{
+				Err: err,
+			})
+		}
+
+		fmt.Print("Chat in phase 1(input): ", chat)
+
+		chat.DateCreated, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+		chat.LastMessageTime, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+		chat.Messages = []primitive.ObjectID{}
+		chat.Status = "waiting"
+		// Create the chat
+		chatID, err := ga.DB.CreateChat(chat)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create chat"})
+			return
+		}
+		// Return success response
+		ctx.JSON(http.StatusCreated, gin.H{
+			"message": "Chat created successfully",
+			"chat_id": chatID.Hex(),
+		})
+
+		go ga.AssignChatToCSE(chatID)
+
+		// Start a goroutine to find an available CSE (we'll implement this later// go ga.assignChatToCSE(chatID)
+	}
+}
+
+func (ga *GoApp) Get_All_The_Orders() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		orders, err := ga.DB.GetAllTheOrders()
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get orders"})
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{"orders": orders})
+	}
+}
+
+// Add this function to your GoApp struct
+func (ga *GoApp) AssignChatToCSE(chatID primitive.ObjectID) {
+	// Create a ticker that ticks every 5 seconds
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	// Set a timeout of 1 hour (in case no CSE becomes available)
+	timeout := time.After(1 * time.Hour)
+
+	for {
+		select {
+		case <-ticker.C:
+			// Check if the chat is still in waiting status
+			chat, err := ga.DB.GetChatByID(chatID)
+			if err != nil {
+				ga.App.ErrorLogger.Printf("Error getting chat %s: %v", chatID.Hex(), err)
+				return
+			}
+
+			// If chat is no longer waiting, exit the goroutine
+			if chat.Status != "waiting" {
+				return
+			}
+
+			// Get all available CSEs
+			cses, err := ga.DB.GetAvailableCSEs()
+			if err != nil {
+				ga.App.ErrorLogger.Printf("Error getting available CSEs: %v", err)
+				continue
+			}
+
+			if len(cses) == 0 {
+				ga.App.InfoLogger.Println("No CSEs available, will try again later")
+				continue
+			}
+
+			// Find the most available CSE
+			assigned := false
+			for _, cse := range cses {
+				if cse.ActiveChatsCount < 5 {
+					// Assign to active chats
+					err = ga.DB.AssignChatToCSE(chatID, cse.ID, true)
+					if err == nil {
+						ga.App.InfoLogger.Printf("Chat %s assigned to CSE %s as active", chatID.Hex(), cse.ID.Hex())
+						assigned = true
+						break
+					}
+				} else if cse.PendingChatsCount < 10 {
+					// Assign to pending chats
+					err = ga.DB.AssignChatToCSE(chatID, cse.ID, false)
+					if err == nil {
+						ga.App.InfoLogger.Printf("Chat %s assigned to CSE %s as pending", chatID.Hex(), cse.ID.Hex())
+						assigned = true
+						break
+					}
+				}
+			}
+
+			if assigned {
+				return
+			}
+
+		case <-timeout:
+			// If we've been trying for an hour with no success, log and exit
+			ga.App.ErrorLogger.Printf("Timeout reached for chat %s, no CSE available after 1 hour", chatID.Hex())
+			return
+		}
+	}
+}
+
+// Send a message (can be used by both user and CSE)
+func (ga *GoApp) SendMessageAsUser() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// Get user ID from context (set by middleware)
+		// Parse request body
+		var input struct {
+			ChatID     string `json:"chat_id" binding:"required"`
+			Text       string `json:"text" binding:"required"`
+			ReceiverID string `json:"receiver_id" binding:"required"`
+			SenderID   string `json:"sender_id" binding:"required"`
+		}
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		fmt.Print("Chat in phase 1(input): ", input)
+
+		chatID, err := primitive.ObjectIDFromHex(input.ChatID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID format"})
+			return
+		}
+
+		receiverID, err := primitive.ObjectIDFromHex(input.ReceiverID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid receiver ID format"})
+			return
+		}
+
+		senderID, err := primitive.ObjectIDFromHex(input.SenderID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sender ID format"})
+			return
+		}
+
+		fmt.Print("Chat in phase 2(input): ", input)
+		// Get chat to verify access
+		chat, err := ga.DB.GetChatByID(chatID)
+		if err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Chat not found"})
+			return
+		}
+
+		fmt.Print("Chat in phase 3(input): ", input)
+
+		// Verify that the user has access to this chat
+		if chat.UserID != senderID {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have access to this chat"})
+			return
+		}
+		// Verify chat status
+		if chat.Status == "closed" {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Cannot send messages to a closed chat"})
+			return
+		}
+		// If chat is pending and CSE is sending a message, move it to activ
+		// Create and add the message
+		message := &model.Message{
+			Text:       input.Text,
+			ChatID:     chatID,
+			SenderID:   senderID,
+			ReceiverID: receiverID,
+		}
+
+		fmt.Print("Chat in phase 4(input): ", input)
+
+		messageID, err := ga.DB.AddMessage(message)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
+			return
+		}
+
+		fmt.Print("Chat in phase 5(input): ", input)
+
+		ctx.JSON(http.StatusCreated, gin.H{
+			"message":    "Message sent successfully",
+			"message_id": messageID.Hex(),
+		})
+	}
+}
+func (ga *GoApp) SendMessageAsCSE() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// Get user ID from context (set by middleware)
+		// Parse request body
+		var input struct {
+			ChatID     string `json:"chat_id" binding:"required"`
+			Text       string `json:"text" binding:"required"`
+			ReceiverID string `json:"receiver_id" binding:"required"`
+			SenderID   string `json:"sender_id" binding:"required"`
+		}
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		fmt.Print("Chat in phase 1(input): ", input)
+
+		chatID, err := primitive.ObjectIDFromHex(input.ChatID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID format"})
+			return
+		}
+
+		receiverID, err := primitive.ObjectIDFromHex(input.ReceiverID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid receiver ID format"})
+			return
+		}
+
+		senderID, err := primitive.ObjectIDFromHex(input.SenderID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid sender ID format"})
+			return
+		}
+
+		fmt.Print("Chat in phase 2: ", chatID, receiverID, senderID)
+
+		// Get chat to verify access
+		chat, err := ga.DB.GetChatByID(chatID)
+		if err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Chat not found"})
+			return
+		}
+
+		fmt.Print("Chat in phase 3: ", chat)
+
+		// Verify that the user has access to this chat
+		if chat.CseID != senderID {
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "You don't have access to this chat"})
+			return
+		}
+		// Verify chat status
+		if chat.Status == "closed" || chat.Status == "pending" {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Cannot send messages to a closed or pending chat"})
+			return
+		}
+		// If chat is pending and CSE is sending a message, move it to activ
+		// Create and add the message
+		message := &model.Message{
+			Text:       input.Text,
+			ChatID:     chatID,
+			SenderID:   senderID,
+			ReceiverID: receiverID,
+		}
+
+		fmt.Print("Chat in phase 4: ", message)
+
+		messageID, err := ga.DB.AddMessage(message)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send message"})
+			return
+		}
+
+		fmt.Print("Chat in phase 5: ", messageID)
+
+		ctx.JSON(http.StatusCreated, gin.H{
+			"message":    "Message sent successfully",
+			"message_id": messageID.Hex(),
+		})
+	}
+}
+
+// Get chat history
+func (ga *GoApp) GetChatHistory() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// Get user ID from context (set by middleware)// Get chat ID from URL parameter
+		chatID, err := primitive.ObjectIDFromHex(ctx.Param("id"))
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID format"})
+			return
+		}
+
+		fmt.Print("Chat in phase 1: ", chatID)
+		// Get chat to verify access
+		chat, err := ga.DB.GetChatByID(chatID)
+		if err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Chat not found"})
+			return
+		}
+
+		// Verify that the user has access to this chat
+		fmt.Print("Chat in phase 2: ", chat)
+		// Get messages for this chat
+		messages, err := ga.DB.GetMessagesByChat(chatID)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to retrieve chat history"})
+			return
+		}
+
+		fmt.Print("Chat in phase 3: ", messages)
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"chat_id":  chatID.Hex(),
+			"status":   chat.Status,
+			"messages": messages,
+		})
 	}
 }

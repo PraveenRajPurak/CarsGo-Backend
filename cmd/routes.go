@@ -25,7 +25,8 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	router.GET("/get-all-payments", g.Get_All_Payments())
 	router.GET("/get-all-categories", g.Get_All_Categories())
 	router.GET("/view-all-products", g.ViewProducts())
-	router.GET("/get-cses", g.GetAllCSES())
+	router.GET("/get-cseData", g.GetAllCSEData())
+	router.GET("/get-all-orders", g.Get_All_The_Orders())
 
 	router.POST("/sign-up-admin", g.Sign_Up_Admin())
 	router.POST("/sign-in-admin", sessions.Sessions("admin_session", adminCookieStore), g.Sign_In_Admin())
@@ -50,6 +51,9 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedUsers.POST("shipment-creation", g.Shipment_Creation())
 	protectedUsers.GET("get-user-by-id", g.Get_User_By_Id())
 	protectedUsers.GET("get-user-orders", g.Get_User_Orders())
+	protectedUsers.POST("/create-chat", g.CreateChat())
+	protectedUsers.POST("/send-message", g.SendMessageAsUser())
+	protectedUsers.GET("/chat/:id", g.GetChatHistory())
 
 	protectedAdmin := r.Group("/admin")
 	protectedAdmin.Use(sessions.Sessions("admin_session", adminCookieStore))
@@ -76,4 +80,6 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedCSE.Use(sessions.Sessions("cse_session", cseCookieStore))
 	protectedCSE.Use(CSE_Authorisation())
 	protectedCSE.POST("/logout", g.CSELogout())
+	protectedCSE.POST("/send-message", g.SendMessageAsCSE())
+	protectedCSE.GET("/chat/:id", g.GetChatHistory())
 }
