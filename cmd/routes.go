@@ -12,12 +12,14 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 
 	userCookieStore := cookie.NewStore([]byte("user_cookie"))
 	adminCookieStore := cookie.NewStore([]byte("admin_cookie"))
+	cseCookieStore := cookie.NewStore([]byte("cse_cookie"))
 	router.Use(sessions.Sessions("user_session", userCookieStore))
 
 	router.GET("/", g.Home())
 
 	router.POST("/sign-up", g.Sign_Up())
 	router.POST("/sign-in", g.Sign_In())
+	router.POST("/cse_login", g.CSELogin())
 	router.POST("/get-single-product", g.Get_Single_Product())
 	router.GET("/get-all-users", g.Get_All_Users())
 	router.GET("/get-all-payments", g.Get_All_Payments())
@@ -68,5 +70,10 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedAdmin.POST("payment-creation", g.Payment_Creation())
 	protectedAdmin.DELETE("delete-order/:id", g.DeleteOrder())
 	protectedAdmin.POST("/create-cse", g.CreateCSE())
-	protectedAdmin.POST("/get-cses", g.GetAllCSES())
+	protectedAdmin.GET("/get-cses", g.GetAllCSES())
+
+	protectedCSE := r.Group("/cse")
+	protectedCSE.Use(sessions.Sessions("cse_session", cseCookieStore))
+	protectedCSE.Use(CSE_Authorisation())
+	protectedCSE.POST("/logout", g.CSELogout())
 }

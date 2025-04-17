@@ -54,4 +54,6 @@ type DBRepo interface {
 	InsertMultipleProductsBulk(products []*model.Product) (int, int, error)
 	InsertCSE(cse model.CSE) (primitive.ObjectID, error)
 	GetAllCSEs() ([]primitive.M, error)
+	GetCSEByCredentials(cseID string) (model.CSE, error)
+	UpdateCSEStatus(id primitive.ObjectID, status string) error
 }

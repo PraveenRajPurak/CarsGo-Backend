@@ -1562,3 +1562,133 @@ func (ga *GoApp) GetAllCSES() gin.HandlerFunc {
 		})
 	}
 }
+
+func (ga *GoApp) CSELogin() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var input struct {
+			CseID    string `json:"cse_id" binding:"required"`
+			Password string `json:"password" binding:"required"`
+		}
+
+		fmt.Printf("Inputs :-")
+
+		fmt.Printf("CSE_ID: %v\nPassword: %v\n", input.CseID, input.Password)
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Get CSE from database
+		cse, err := ga.DB.GetCSEByCredentials(input.CseID)
+		if err != nil {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+			return
+		}
+
+		fmt.Printf("Information extracted from db :- ")
+		fmt.Printf("CSE_ID: %v\nPassword: %v\n", cse.CseID, cse.Password)
+		fmt.Printf("CSE_Name: %v\nEmail: %v\n", cse.Name, cse.Email)
+		fmt.Print("cse : ",cse)
+
+		verified, err := encrypt.VerifyPassword(cse.Password, input.Password)
+		if err != nil {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, err)
+			ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered user detected using wrong password"})
+			return
+		}
+
+		if verified {
+
+			cookieData := sessions.Default(ctx)
+
+			cseInfo := map[string]interface{}{
+				"ID":    cse.ID,
+				"Email": cse.Email,
+				"Name":  cse.Name,
+			}
+
+			cookieData.Set("cseInfo", cseInfo)
+
+			if err := cookieData.Save(); err != nil {
+				_ = ctx.AbortWithError(http.StatusInternalServerError, err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"message": "error while saving cookie"})
+				return
+			}
+
+			t1, t2, err := auth.Generate(cse.Email, cse.ID, cse.Name)
+
+			if err != nil {
+				_ = ctx.AbortWithError(http.StatusInternalServerError, err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"message": "error while generating tokens"})
+				return
+			}
+
+			cookieData.Set("cse_token", t1)
+
+			if err := cookieData.Save(); err != nil {
+				_ = ctx.AbortWithError(http.StatusInternalServerError, err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"message": "error while saving cookie"})
+				return
+			}
+
+			cookieData.Set("new_cse_token", t2)
+
+			if err := cookieData.Save(); err != nil {
+				_ = ctx.AbortWithError(http.StatusInternalServerError, err)
+				ctx.JSON(http.StatusInternalServerError, gin.H{"message": "error while saving cookie"})
+				return
+			}
+
+			// tk := map[string]string{
+			// 	"cse_Token":    t1,
+			// 	"new_cse_Token": t2,
+			// }
+
+			err = ga.DB.UpdateCSEStatus(cse.ID, "online")
+			if err != nil {
+				ga.App.ErrorLogger.Printf("Error updating CSE status: %v", err)
+				// Continue anyway, as login was successful
+			}
+
+			ctx.JSON(http.StatusOK, gin.H{
+				"message":       "Successfully Logged in",
+				"email":         cse.Email,
+				"id":            cse.ID,
+				"name":          cse.Name,
+				"session_token": t1,
+			})
+		} else {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered admin detected using wrong credentials"})
+			return
+		}
+	}
+}
+
+// Also add a logout handler
+func (ga *GoApp) CSELogout() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// Get CSE ID from context (set by middleware)
+		uidInterface, exists := ctx.Get("UID")
+		if !exists {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			return
+		}
+
+		uid := uidInterface.(string)
+		cseID, err := primitive.ObjectIDFromHex(uid)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid CSE ID"})
+			return
+		}
+
+		// Update CSE status to offline
+		err = ga.DB.UpdateCSEStatus(cseID, "offline")
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update status"})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{"message": "Logged out successfully"})
+	}
+}

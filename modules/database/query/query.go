@@ -1285,3 +1285,45 @@ func (ga *GoAppDB) GetAllCSEs() ([]primitive.M, error) {
 
 	return res, nil
 }
+
+func (g *GoAppDB) GetCSEByCredentials(cseID string) (model.CSE, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var cse model.CSE
+
+	filter := bson.M{"cse_id": cseID}
+	err := User(g.DB, "cses").FindOne(ctx, filter).Decode(&cse)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			g.App.ErrorLogger.Printf("CSE with ID %s not found", cseID)
+			return cse, errors.New("invalid credentials")
+		}
+		g.App.ErrorLogger.Printf("Error finding CSE: %v", err)
+		return cse, err
+	}
+
+	return cse, nil
+}
+
+func (g *GoAppDB) UpdateCSEStatus(id primitive.ObjectID, status string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": id}
+	update := bson.M{
+		"$set": bson.M{
+			"status":     status,
+			"updated_at": time.Now(),
+		},
+	}
+
+	_, err := User(g.DB, "cses").UpdateOne(ctx, filter, update)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating CSE status: %v", err)
+		return err
+	}
+
+	return nil
+}
