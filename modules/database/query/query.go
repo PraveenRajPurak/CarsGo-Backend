@@ -1214,55 +1214,36 @@ func (ga *GoAppDB) GetAllPayments() ([]primitive.M, error) {
 	return res, nil
 }
 
-func (ga *GoAppDB) InsertCSE(cse model.CSE) (primitive.ObjectID, error) {
+func (ga *GoAppDB) InsertCSE(cse *model.CSE) (bool, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
-	// Hash the password
-	hashedPassword, err := encrypt.Hash(cse.Password)
-	if err != nil {
-		ga.App.ErrorLogger.Printf("cannot hash password: %v", err)
-		return primitive.NilObjectID, err
+	regMail := regexp.MustCompile("^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$")
+
+	if !regMail.MatchString(cse.Email) {
+
+		ga.App.ErrorLogger.Println("invalid registered details - email")
+		return false, 0, errors.New("invalid registered details - email")
+
 	}
 
-	// Set up the CSE object with initial values
-	cse.ID = primitive.NewObjectID()
-	cse.Password = hashedPassword
-	cse.CreatedAt = time.Now()
-	cse.UpdatedAt = time.Now()
-	cse.Status = "offline"
-	cse.ActiveChats = []primitive.ObjectID{}
-	cse.PendingChats = []primitive.ObjectID{}
-	cse.ClosedChats = []primitive.ObjectID{}
-	cse.ActiveChatsCount = 0
-	cse.PendingChatsCount = 0
+	filter := bson.D{{Key: "email", Value: cse.Email}}
 
-	// Insert into database
+	var res bson.M
+	err := User(ga.DB, "cses").FindOne(ctx, filter).Decode(&res)
 
-	fmt.Printf("Inserting CSE: %v\n", cse)
-	fmt.Printf("Information sent :- ")
-	fmt.Printf("ID: %v\n", cse.ID)
-	fmt.Printf("Name: %v\n", cse.Name)
-	fmt.Printf("Email: %v\n", cse.Email)
-	fmt.Printf("Password: %v\n", cse.Password)
-	fmt.Printf("Phone: %v\n", cse.PhoneNumber)
-	fmt.Printf("Status: %v\n", cse.Status)
-	fmt.Printf("ActiveChats: %v\n", cse.ActiveChats)
-	fmt.Printf("PendingChats: %v\n", cse.PendingChats)
-	fmt.Printf("ClosedChats: %v\n", cse.ClosedChats)
-	fmt.Printf("ActiveChatsCount: %v\n", cse.ActiveChatsCount)
-	fmt.Printf("PendingChatsCount: %v\n", cse.PendingChatsCount)
-	fmt.Printf("CreatedAt: %v\n", cse.CreatedAt)
-	fmt.Printf("UpdatedAt: %v\n", cse.UpdatedAt)
-
-	result, err := User(ga.DB, "cses").InsertOne(ctx, cse)
 	if err != nil {
-		ga.App.ErrorLogger.Printf("cannot insert CSE into database: %v", err)
-		return primitive.NilObjectID, err
+		if err == mongo.ErrNoDocuments {
+			cse.ID = primitive.NewObjectID()
+			_, insertErr := User(ga.DB, "cses").InsertOne(ctx, cse)
+			if insertErr != nil {
+				ga.App.ErrorLogger.Fatalf("cannot add user to the database : %v ", insertErr)
+			}
+			return true, 1, nil
+		}
+		ga.App.ErrorLogger.Fatal(err)
 	}
-
-	ga.App.InfoLogger.Printf("CSE created with ID: %v", result.InsertedID)
-	return result.InsertedID.(primitive.ObjectID), nil
+	return true, 2, nil
 }
 
 func (ga *GoAppDB) GetAllCSEs() ([]primitive.M, error) {
@@ -1286,38 +1267,33 @@ func (ga *GoAppDB) GetAllCSEs() ([]primitive.M, error) {
 	return res, nil
 }
 
-func (g *GoAppDB) GetCSEByCredentials(cseID string) (model.CSE, error) {
+func (g *GoAppDB) GetCSEByCredentials(cseID string) (primitive.M, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
-	var cse model.CSE
+	var res bson.M
 
-	filter := bson.M{"cse_id": cseID}
-	err := User(g.DB, "cses").FindOne(ctx, filter).Decode(&cse)
+	filter := bson.D{{Key: "cse_id", Value: cseID}}
+
+	err := User(g.DB, "cses").FindOne(ctx, filter).Decode(&res)
 
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			g.App.ErrorLogger.Printf("CSE with ID %s not found", cseID)
-			return cse, errors.New("invalid credentials")
+			g.App.ErrorLogger.Println("no document found for this query")
+			return nil, err
 		}
-		g.App.ErrorLogger.Printf("Error finding CSE: %v", err)
-		return cse, err
+		g.App.ErrorLogger.Fatalf("cannot execute the database query perfectly : %v ", err)
 	}
 
-	return cse, nil
+	return res, nil
 }
 
 func (g *GoAppDB) UpdateCSEStatus(id primitive.ObjectID, status string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
-	filter := bson.M{"_id": id}
-	update := bson.M{
-		"$set": bson.M{
-			"status":     status,
-			"updated_at": time.Now(),
-		},
-	}
+	filter := bson.D{{Key: "_id", Value: id}}
+	update := bson.D{{Key: "$set", Value: bson.D{{Key: "status", Value: status },{Key: "updated_at", Value: time.Now()}}}}
 
 	_, err := User(g.DB, "cses").UpdateOne(ctx, filter, update)
 	if err != nil {

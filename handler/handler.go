@@ -1507,44 +1507,81 @@ func (ga *GoApp) Get_All_Payments() gin.HandlerFunc {
 func (ga *GoApp) CreateCSE() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
 		// Parse the request body
-		var input struct {
-			CseID       string `json:"cse_id" binding:"required"`
-			Password    string `json:"password" binding:"required"`
-			Name        string `json:"name" binding:"required"`
-			PhoneNumber string `json:"phone_number" binding:"required"`
-			Email       string `json:"email" binding:"required,email"`
-		}
+		var cse *model.CSE
 
-		fmt.Printf("Data Received from Admin:- \nCSE_ID: %v\nPassword: %v\nName: %v\nPhone_Number: %v\nEmail: %v\n", input.CseID, input.Password, input.Name, input.PhoneNumber, input.Email)
-
-		if err := ctx.ShouldBindJSON(&input); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		err := ctx.ShouldBindJSON(&cse)
+		if err != nil {
+			_ = ctx.AbortWithError(http.StatusBadRequest, gin.Error{
+				Err: err,
+			})
 		}
+		// Set up the CSE object with initial values		cse.Password = hashedPassword
+		cse.CreatedAt, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+		cse.UpdatedAt, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+		cse.Password, _ = encrypt.Hash(cse.Password)
+		cse.Status = "offline"
+		cse.ActiveChats = []primitive.ObjectID{}
+		cse.PendingChats = []primitive.ObjectID{}
+		cse.ClosedChats = []primitive.ObjectID{}
+		cse.ActiveChatsCount = 0
+		cse.PendingChatsCount = 0
 
-		// Create CSE object
-		cse := model.CSE{
-			CseID:       input.CseID,
-			Password:    input.Password,
-			Name:        input.Name,
-			PhoneNumber: input.PhoneNumber,
-			Email:       input.Email,
-		}
+		// Insert into database
+
+		fmt.Printf("Inserting CSE: %v\n", cse)
+
+		fmt.Printf("Information sent :- ")
+		fmt.Printf("ID: %v\n", cse.ID)
+		fmt.Printf("Name: %v\n", cse.Name)
+		fmt.Printf("Email: %v\n", cse.Email)
+		fmt.Printf("Password: %v\n", cse.Password)
+		fmt.Printf("Phone: %v\n", cse.PhoneNumber)
+		fmt.Printf("Status: %v\n", cse.Status)
+		fmt.Printf("ActiveChats: %v\n", cse.ActiveChats)
+		fmt.Printf("PendingChats: %v\n", cse.PendingChats)
+		fmt.Printf("ClosedChats: %v\n", cse.ClosedChats)
+		fmt.Printf("ActiveChatsCount: %v\n", cse.ActiveChatsCount)
+		fmt.Printf("PendingChatsCount: %v\n", cse.PendingChatsCount)
+		fmt.Printf("CreatedAt: %v\n", cse.CreatedAt)
+		fmt.Printf("UpdatedAt: %v\n", cse.UpdatedAt)
 
 		fmt.Printf("CSE Object:- \nCSE_ID: %v\nPassword: %v\nName: %v\nPhone_Number: %v\nEmail: %v\n", cse.CseID, cse.Password, cse.Name, cse.PhoneNumber, cse.Email)
 		// Insert CSE into database
-		id, err := ga.DB.InsertCSE(cse)
 		if err != nil {
-			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create CSE account"})
-			ga.App.ErrorLogger.Printf("Error creating CSE: %v", err)
+			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
+		}
+
+		if err := ga.App.Validate.Struct(&cse); err != nil {
+			if _, ok := err.(*validator.InvalidValidationError); !ok {
+				_ = ctx.AbortWithError(http.StatusBadRequest, gin.Error{Err: err})
+				ga.App.InfoLogger.Println(err)
+				return
+			}
+		}
+
+		ok, status, err := ga.DB.InsertCSE(cse)
+
+		if err != nil {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, errors.New("error while adding new CSE"))
+			ctx.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 			return
 		}
 
-		// Return success response
-		ctx.JSON(http.StatusCreated, gin.H{
-			"message": "CSE account created successfully",
-			"cse_id":  id.Hex(),
-		})
+		if !ok {
+			_ = ctx.AbortWithError(http.StatusInternalServerError, err)
+			return
+		}
+
+		switch status {
+		case 1:
+			{
+				ctx.JSON(http.StatusCreated, gin.H{"message": "CSE created successfully"})
+			}
+		case 2:
+			{
+				ctx.JSON(http.StatusConflict, gin.H{"message": "CSE already exists"})
+			}
+		}
 	}
 }
 
@@ -1565,36 +1602,31 @@ func (ga *GoApp) GetAllCSES() gin.HandlerFunc {
 
 func (ga *GoApp) CSELogin() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		var input struct {
-			CseID    string `json:"cse_id" binding:"required"`
-			Password string `json:"password" binding:"required"`
-		}
 
-		fmt.Printf("Inputs :-")
-
-		fmt.Printf("CSE_ID: %v\nPassword: %v\n", input.CseID, input.Password)
-
-		if err := ctx.ShouldBindJSON(&input); err != nil {
-			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		var cse *model.CSE
+		if err := ctx.ShouldBindJSON(&cse); err != nil {
+			_ = ctx.AbortWithError(http.StatusBadRequest, gin.Error{Err: err})
 		}
 
 		// Get CSE from database
-		cse, err := ga.DB.GetCSEByCredentials(input.CseID)
+		res, err := ga.DB.GetCSEByCredentials(cse.CseID)
 		if err != nil {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 			return
 		}
 
-		fmt.Printf("Information extracted from db :- ")
-		fmt.Printf("CSE_ID: %v\nPassword: %v\n", cse.CseID, cse.Password)
-		fmt.Printf("CSE_Name: %v\nEmail: %v\n", cse.Name, cse.Email)
-		fmt.Print("cse : ",cse)
+		fmt.Print("cse from DB : ", res)
 
-		verified, err := encrypt.VerifyPassword(cse.Password, input.Password)
+		id := res["_id"].(primitive.ObjectID)
+		password := res["password"].(string)
+
+		fmt.Printf("ID: %v\n", id)
+		fmt.Printf("Password: %v\n", password)
+
+		verified, err := encrypt.VerifyPassword(cse.Password, password)
 		if err != nil {
 			_ = ctx.AbortWithError(http.StatusInternalServerError, err)
-			ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered user detected using wrong password"})
+			ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered cse detected using wrong password"})
 			return
 		}
 
@@ -1603,9 +1635,9 @@ func (ga *GoApp) CSELogin() gin.HandlerFunc {
 			cookieData := sessions.Default(ctx)
 
 			cseInfo := map[string]interface{}{
-				"ID":    cse.ID,
+				"ID":    id,
 				"Email": cse.Email,
-				"Name":  cse.Name,
+				"Name":  res["name"],
 			}
 
 			cookieData.Set("cseInfo", cseInfo)
@@ -1616,7 +1648,7 @@ func (ga *GoApp) CSELogin() gin.HandlerFunc {
 				return
 			}
 
-			t1, t2, err := auth.Generate(cse.Email, cse.ID, cse.Name)
+			t1, t2, err := auth.Generate(cse.Email, id, res["name"].(string))
 
 			if err != nil {
 				_ = ctx.AbortWithError(http.StatusInternalServerError, err)
@@ -1641,8 +1673,8 @@ func (ga *GoApp) CSELogin() gin.HandlerFunc {
 			}
 
 			// tk := map[string]string{
-			// 	"cse_Token":    t1,
-			// 	"new_cse_Token": t2,
+			// 	"token":    t1,
+			// 	"newToken": t2,
 			// }
 
 			err = ga.DB.UpdateCSEStatus(cse.ID, "online")
@@ -1654,9 +1686,11 @@ func (ga *GoApp) CSELogin() gin.HandlerFunc {
 			ctx.JSON(http.StatusOK, gin.H{
 				"message":       "Successfully Logged in",
 				"email":         cse.Email,
-				"id":            cse.ID,
-				"name":          cse.Name,
+				"id":            id,
+				"name":          res["name"],
 				"session_token": t1,
+				"cse_id":        cse.CseID,
+				"phone_number":  cse.PhoneNumber,
 			})
 		} else {
 			ctx.JSON(http.StatusUnauthorized, gin.H{"message": "unregistered admin detected using wrong credentials"})
