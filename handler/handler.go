@@ -1503,3 +1503,62 @@ func (ga *GoApp) Get_All_Payments() gin.HandlerFunc {
 		ctx.JSON(http.StatusOK, gin.H{"message": "All payments fetched successfully", "data": payments})
 	}
 }
+
+func (ga *GoApp) CreateCSE() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// Parse the request body
+		var input struct {
+			CseID       string `json:"cse_id" binding:"required"`
+			Password    string `json:"password" binding:"required"`
+			Name        string `json:"name" binding:"required"`
+			PhoneNumber string `json:"phone_number" binding:"required"`
+			Email       string `json:"email" binding:"required,email"`
+		}
+
+		fmt.Printf("Data Received from Admin:- \nCSE_ID: %v\nPassword: %v\nName: %v\nPhone_Number: %v\nEmail: %v\n", input.CseID, input.Password, input.Name, input.PhoneNumber, input.Email)
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		// Create CSE object
+		cse := model.CSE{
+			CseID:       input.CseID,
+			Password:    input.Password,
+			Name:        input.Name,
+			PhoneNumber: input.PhoneNumber,
+			Email:       input.Email,
+		}
+
+		fmt.Printf("CSE Object:- \nCSE_ID: %v\nPassword: %v\nName: %v\nPhone_Number: %v\nEmail: %v\n", cse.CseID, cse.Password, cse.Name, cse.PhoneNumber, cse.Email)
+		// Insert CSE into database
+		id, err := ga.DB.InsertCSE(cse)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create CSE account"})
+			ga.App.ErrorLogger.Printf("Error creating CSE: %v", err)
+			return
+		}
+
+		// Return success response
+		ctx.JSON(http.StatusCreated, gin.H{
+			"message": "CSE account created successfully",
+			"cse_id":  id.Hex(),
+		})
+	}
+}
+
+func (ga *GoApp) GetAllCSES() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		cses, err := ga.DB.GetAllCSEs()
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get CSEs"})
+			ga.App.ErrorLogger.Printf("Error getting CSEs: %v", err)
+			return
+		}
+		ctx.JSON(http.StatusOK, gin.H{
+			"message": "CSEs fetched successfully",
+			"data":    cses,
+		})
+	}
+}

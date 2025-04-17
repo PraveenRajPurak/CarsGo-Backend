@@ -230,58 +230,58 @@ func (g *GoAppDB) InsertProduct(product *model.Product) (bool, int, error) {
 }
 
 func (g *GoAppDB) InsertMultipleProductsBulk(products []*model.Product) (int, int, error) {
-    ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
 
-    // First check which products already exist
-    var productNames []string
-    for _, product := range products {
-        productNames = append(productNames, product.Name)
-    }
+	// First check which products already exist
+	var productNames []string
+	for _, product := range products {
+		productNames = append(productNames, product.Name)
+	}
 
-    filter := bson.M{"name": bson.M{"$in": productNames}}
-    cursor, err := Product(g.DB, "product").Find(ctx, filter)
-    if err != nil {
-        g.App.ErrorLogger.Printf("Error querying existing products: %v", err)
-        return 0, 0, err
-    }
+	filter := bson.M{"name": bson.M{"$in": productNames}}
+	cursor, err := Product(g.DB, "product").Find(ctx, filter)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error querying existing products: %v", err)
+		return 0, 0, err
+	}
 
-    // Create a map of existing product names
-    existingProducts := make(map[string]bool)
-    var results []bson.M
-    if err = cursor.All(ctx, &results); err != nil {
-        g.App.ErrorLogger.Printf("Error processing cursor: %v", err)
-        return 0, 0, err
-    }
-    
-    for _, result := range results {
-        if name, ok := result["name"].(string); ok {
-            existingProducts[name] = true
-        }
-    }
+	// Create a map of existing product names
+	existingProducts := make(map[string]bool)
+	var results []bson.M
+	if err = cursor.All(ctx, &results); err != nil {
+		g.App.ErrorLogger.Printf("Error processing cursor: %v", err)
+		return 0, 0, err
+	}
 
-    // Prepare new products for insertion
-    var newProducts []interface{}
-    for _, product := range products {
-        if _, exists := existingProducts[product.Name]; !exists {
-            product.ID = primitive.NewObjectID()
-            product.CreatedAt, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
-            product.UpdatedAt = product.CreatedAt
-            newProducts = append(newProducts, product)
-        }
-    }
+	for _, result := range results {
+		if name, ok := result["name"].(string); ok {
+			existingProducts[name] = true
+		}
+	}
 
-    // Bulk insert new products
-    if len(newProducts) > 0 {
-        result, err := Product(g.DB, "product").InsertMany(ctx, newProducts)
-        if err != nil {
-            g.App.ErrorLogger.Printf("Error bulk inserting products: %v", err)
-            return 0, len(existingProducts), err
-        }
-        return len(result.InsertedIDs), len(existingProducts), nil
-    }
+	// Prepare new products for insertion
+	var newProducts []interface{}
+	for _, product := range products {
+		if _, exists := existingProducts[product.Name]; !exists {
+			product.ID = primitive.NewObjectID()
+			product.CreatedAt, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+			product.UpdatedAt = product.CreatedAt
+			newProducts = append(newProducts, product)
+		}
+	}
 
-    return 0, len(existingProducts), nil
+	// Bulk insert new products
+	if len(newProducts) > 0 {
+		result, err := Product(g.DB, "product").InsertMany(ctx, newProducts)
+		if err != nil {
+			g.App.ErrorLogger.Printf("Error bulk inserting products: %v", err)
+			return 0, len(existingProducts), err
+		}
+		return len(result.InsertedIDs), len(existingProducts), nil
+	}
+
+	return 0, len(existingProducts), nil
 }
 
 func (g *GoAppDB) Update_Stock(id primitive.ObjectID, new_stock int) (bool, error) {
@@ -1200,6 +1200,78 @@ func (ga *GoAppDB) GetAllPayments() ([]primitive.M, error) {
 	var res []primitive.M
 
 	cursor, err := User(ga.DB, "payment").Find(ctx, bson.D{})
+
+	if err != nil {
+		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly : %v ", err)
+		return nil, err
+	}
+
+	if err = cursor.All(ctx, &res); err != nil {
+		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly. There is some problem in cursor : %v ", err)
+		return nil, err
+	}
+
+	return res, nil
+}
+
+func (ga *GoAppDB) InsertCSE(cse model.CSE) (primitive.ObjectID, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// Hash the password
+	hashedPassword, err := encrypt.Hash(cse.Password)
+	if err != nil {
+		ga.App.ErrorLogger.Printf("cannot hash password: %v", err)
+		return primitive.NilObjectID, err
+	}
+
+	// Set up the CSE object with initial values
+	cse.ID = primitive.NewObjectID()
+	cse.Password = hashedPassword
+	cse.CreatedAt = time.Now()
+	cse.UpdatedAt = time.Now()
+	cse.Status = "offline"
+	cse.ActiveChats = []primitive.ObjectID{}
+	cse.PendingChats = []primitive.ObjectID{}
+	cse.ClosedChats = []primitive.ObjectID{}
+	cse.ActiveChatsCount = 0
+	cse.PendingChatsCount = 0
+
+	// Insert into database
+
+	fmt.Printf("Inserting CSE: %v\n", cse)
+	fmt.Printf("Information sent :- ")
+	fmt.Printf("ID: %v\n", cse.ID)
+	fmt.Printf("Name: %v\n", cse.Name)
+	fmt.Printf("Email: %v\n", cse.Email)
+	fmt.Printf("Password: %v\n", cse.Password)
+	fmt.Printf("Phone: %v\n", cse.PhoneNumber)
+	fmt.Printf("Status: %v\n", cse.Status)
+	fmt.Printf("ActiveChats: %v\n", cse.ActiveChats)
+	fmt.Printf("PendingChats: %v\n", cse.PendingChats)
+	fmt.Printf("ClosedChats: %v\n", cse.ClosedChats)
+	fmt.Printf("ActiveChatsCount: %v\n", cse.ActiveChatsCount)
+	fmt.Printf("PendingChatsCount: %v\n", cse.PendingChatsCount)
+	fmt.Printf("CreatedAt: %v\n", cse.CreatedAt)
+	fmt.Printf("UpdatedAt: %v\n", cse.UpdatedAt)
+
+	result, err := User(ga.DB, "cses").InsertOne(ctx, cse)
+	if err != nil {
+		ga.App.ErrorLogger.Printf("cannot insert CSE into database: %v", err)
+		return primitive.NilObjectID, err
+	}
+
+	ga.App.InfoLogger.Printf("CSE created with ID: %v", result.InsertedID)
+	return result.InsertedID.(primitive.ObjectID), nil
+}
+
+func (ga *GoAppDB) GetAllCSEs() ([]primitive.M, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	var res []primitive.M
+
+	cursor, err := User(ga.DB, "cses").Find(ctx, bson.D{})
 
 	if err != nil {
 		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly : %v ", err)

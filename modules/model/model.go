@@ -151,3 +151,41 @@ type Ticket struct {
 	CreatedAt    time.Time          `json:"created_At"`
 	UpdatedAt    time.Time          `json:"updated_At"`
 }
+
+type CSE struct {
+    ID               primitive.ObjectID `bson:"_id,omitempty" json:"_id,omitempty"`
+    CseID            string             `bson:"cse_id" json:"cse_id"`
+    Password         string             `bson:"password" json:"-"`
+    Name             string             `bson:"name" json:"name"`
+    PhoneNumber      string             `bson:"phone_number" json:"phone_number"`
+    Email            string             `bson:"email" json:"email"`
+    Status           string             `bson:"status" json:"status"` // "online" or "offline"
+    ActiveChats      []primitive.ObjectID `bson:"active_chats" json:"active_chats"`
+    PendingChats     []primitive.ObjectID `bson:"pending_chats" json:"pending_chats"`
+    ClosedChats      []primitive.ObjectID `bson:"closed_chats" json:"closed_chats"`
+    ActiveChatsCount int                 `bson:"active_chats_count" json:"active_chats_count"`
+    PendingChatsCount int                `bson:"pending_chats_count" json:"pending_chats_count"`
+    CreatedAt        time.Time           `bson:"created_at" json:"created_at"`
+    UpdatedAt        time.Time           `bson:"updated_at" json:"updated_at"`
+}
+
+type Chat struct {
+    ID              primitive.ObjectID   `bson:"_id,omitempty" json:"_id,omitempty"`
+    DateCreated     time.Time            `bson:"date_created" json:"date_created"`
+    DateClosed      time.Time            `bson:"date_closed,omitempty" json:"date_closed,omitempty"`
+    LastMessageTime time.Time            `bson:"last_message_time" json:"last_message_time"`
+    OrderID         primitive.ObjectID   `bson:"order_id" json:"order_id"`
+    UserID          primitive.ObjectID   `bson:"user_id" json:"user_id"`
+    CseID           primitive.ObjectID   `bson:"cse_id,omitempty" json:"cse_id,omitempty"`
+    Messages        []primitive.ObjectID `bson:"messages" json:"messages"`
+    Status          string               `bson:"status" json:"status"` // "active", "pending", "waiting", "closed"
+}
+
+type Message struct {
+    ID         primitive.ObjectID `bson:"_id,omitempty" json:"_id,omitempty"`
+    Text       string             `bson:"text" json:"text"`
+    ChatID     primitive.ObjectID `bson:"chat_id" json:"chat_id"`
+    SenderID   primitive.ObjectID `bson:"sender_id" json:"sender_id"`
+    ReceiverID primitive.ObjectID `bson:"receiver_id" json:"receiver_id"`
+    Timestamp  time.Time          `bson:"timestamp" json:"timestamp"`
+}

@@ -67,4 +67,6 @@ func Routes(r *gin.Engine, g *handler.GoApp) {
 	protectedAdmin.DELETE("delete-product/:id", g.DeleteProduct())
 	protectedAdmin.POST("payment-creation", g.Payment_Creation())
 	protectedAdmin.DELETE("delete-order/:id", g.DeleteOrder())
+	protectedAdmin.POST("/create-cse", g.CreateCSE())
+	protectedAdmin.POST("/get-cses", g.GetAllCSES())
 }
