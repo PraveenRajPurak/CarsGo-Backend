@@ -59,13 +59,16 @@ func main() {
 	webserver.Use(cors.New(cors.Config{
 		AllowOrigins:     []string{"http://localhost:5173"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Admin_Authorization"},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "Admin_Authorization", "CSE_Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
 
 	GoApp := handler.NewGoApp(&app, Client)
+
+	GoApp.StartIdleChatCloser()
+	app.InfoLogger.Println("Idle chat closer started")
 
 	Routes(webserver, GoApp)
 

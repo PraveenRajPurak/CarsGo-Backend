@@ -64,23 +64,35 @@ type ProductDesc struct {
 	Weight          int        `json:"weight"`
 }
 
+type Review struct {
+	ID         primitive.ObjectID `json:"_id" bson:"_id"`
+	ProductID  primitive.ObjectID `json:"product_id"`
+	Review     string             `json:"review"`
+	Rating     int                `json:"rating"`
+	CustomerID primitive.ObjectID `json:"customer_id"`
+	CreatedAt  time.Time          `json:"created_At"`
+}
+
 type Product struct {
-	ID           primitive.ObjectID `json:"_id" bson:"_id"`
-	Name         string             `json:"name" Usage:"required"`
-	Description  ProductDesc        `json:"description" Usage:"required"`
-	Category     string             `json:"category" Usage:"required"`
-	Company_Name string             `json:"company_name" Usage:"required"`
-	Model_Name   string             `json:"model_name" Usage:"required"`
-	RegularPrice int                `json:"regular_price" Usage:"required"`
-	SalePrice    int                `json:"sale_price"`
-	SaleStarts   time.Time          `json:"sale_starts"`
-	SaleEnds     time.Time          `json:"sale_ends"`
-	InStock      bool               `json:"in_stock" Usage:"required"`
-	Stock        int                `json:"stock" Usage:"required"`
-	SKU          string             `json:"sku" Usage:"required"`
-	Images       []string           `json:"images" Usage:"required"`
-	CreatedAt    time.Time          `json:"created_At"`
-	UpdatedAt    time.Time          `json:"updated_At"`
+	ID                primitive.ObjectID `json:"_id" bson:"_id"`
+	Name              string             `json:"name" Usage:"required"`
+	Description       ProductDesc        `json:"description" Usage:"required"`
+	Category          string             `json:"category" Usage:"required"`
+	Company_Name      string             `json:"company_name" Usage:"required"`
+	Model_Name        string             `json:"model_name" Usage:"required"`
+	RegularPrice      int                `json:"regular_price" Usage:"required"`
+	SalePrice         int                `json:"sale_price"`
+	SaleStarts        time.Time          `json:"sale_starts"`
+	SaleEnds          time.Time          `json:"sale_ends"`
+	InStock           bool               `json:"in_stock" Usage:"required"`
+	Stock             int                `json:"stock" Usage:"required"`
+	SKU               string             `json:"sku" Usage:"required"`
+	Images            []string           `json:"images" Usage:"required"`
+	Reviews           []Review           `json:"reviews"`
+	Overall_Rating    float32            `json:"rating"`
+	Summarized_Review string             `json:"summarized_review"`
+	CreatedAt         time.Time          `json:"created_At"`
+	UpdatedAt         time.Time          `json:"updated_At"`
 }
 
 type OrderItem struct {
@@ -101,6 +113,7 @@ type Order struct {
 	OrderStatus   string             `json:"order_status" bson:"order_status"`
 	CustomerID    primitive.ObjectID `json:"customer_id" bson:"customer_id"`
 	ChatID        primitive.ObjectID `json:"chat_id" bson:"chat_id"`
+	Rated         bool               `json:"rated" bson:"rated"`
 	CreatedAt     time.Time          `json:"created_At"`
 	UpdatedAt     time.Time          `json:"updated_At"`
 }

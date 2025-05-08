@@ -803,6 +803,10 @@ func (g *GoAppDB) CreateOrder(order *model.Order) (primitive.M, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 	defer cancel()
 
+	order.ChatID = primitive.NilObjectID
+
+	fmt.Print("Order in phase 1: ", order)
+
 	cr, err := User(g.DB, "orders").InsertOne(ctx, order)
 	if err != nil {
 		g.App.ErrorLogger.Fatalf("cannot insert order in the database : %v ", err)
@@ -923,6 +927,8 @@ func (ga *GoAppDB) GetUserOrders(userId primitive.ObjectID) ([]primitive.M, erro
 			{Key: "order_date", Value: "$userOrders.order_date"},
 			{Key: "order_status", Value: "$userOrders.order_status"},
 			{Key: "orderID", Value: "$userOrders._id"},
+			{Key: "chatID", Value: "$userOrders.chat_id"},
+			{Key: "rated", Value: "$userOrders.rated"},
 		}}},
 	}
 
@@ -942,6 +948,8 @@ func (ga *GoAppDB) GetUserOrders(userId primitive.ObjectID) ([]primitive.M, erro
 		ga.App.ErrorLogger.Fatalf("cannot execute the database query perfectly. There is some problem in cursor : %v ", err)
 		return nil, err
 	}
+
+	fmt.Printf("Pipeline execution result: %+v\n", res)
 
 	return res, nil
 
@@ -978,8 +986,12 @@ func (ga *GoAppDB) GetAllOrders() ([]primitive.M, error) {
 			{Key: "order_status", Value: "$userOrders.order_status"},
 			{Key: "orderID", Value: "$userOrders._id"},
 			{Key: "userID", Value: "$userOrders.customer_id"},
+			{Key: "chatID", Value: "$userOrders.chat_id"},
+			{Key: "rated", Value: "$userOrders.rated"},
 		}}},
 	}
+
+	fmt.Print()
 
 	cursor, err := User(ga.DB, "user").Aggregate(ctx, pipeline)
 
@@ -1325,25 +1337,29 @@ func (g *GoAppDB) CreateChat(chat *model.Chat) (primitive.ObjectID, error) {
 	}
 
 	if res["chat_id"] != nil {
-		g.App.ErrorLogger.Println("chat already exists for this order")
-		return primitive.NilObjectID, errors.New("chat already exists for this order")
+		if res["chat_id"].(primitive.ObjectID) != primitive.NilObjectID {
+			g.App.ErrorLogger.Println("chat already exists for this order")
+			return primitive.NilObjectID, errors.New("chat already exists for this order")
+		} else { // The 'else' keyword should be on the same line as the closing brace of the 'if' block.
+			chat.ID = primitive.NewObjectID()
+
+			_, err = User(g.DB, "chats").InsertOne(ctx, chat)
+			if err != nil {
+				g.App.ErrorLogger.Printf("Error creating chat: %v", err)
+				return primitive.NilObjectID, err
+			}
+
+			err = g.UpdateOrderWithChatID(orderID, chat.ID)
+			if err != nil {
+				g.App.ErrorLogger.Printf("Error updating order with chat ID: %v", err)
+				// We'll continue anyway since the chat was created successfully
+			}
+
+			return chat.ID, nil
+		}
 	}
 
-	chat.ID = primitive.NewObjectID()
-
-	_, err = User(g.DB, "chats").InsertOne(ctx, chat)
-	if err != nil {
-		g.App.ErrorLogger.Printf("Error creating chat: %v", err)
-		return primitive.NilObjectID, err
-	}
-
-	err = g.UpdateOrderWithChatID(orderID, chat.ID)
-	if err != nil {
-		g.App.ErrorLogger.Printf("Error updating order with chat ID: %v", err)
-		// We'll continue anyway since the chat was created successfully
-	}
-
-	return chat.ID, nil
+	return primitive.NilObjectID, nil
 }
 
 func (g *GoAppDB) UpdateOrderWithChatID(orderID primitive.ObjectID, chatID primitive.ObjectID) error {
@@ -1563,6 +1579,459 @@ func (g *GoAppDB) UpdateChatLastMessageTime(chatID primitive.ObjectID) error {
 	if err != nil {
 		g.App.ErrorLogger.Printf("Error updating chat last message time: %v", err)
 		return err
+	}
+
+	return nil
+}
+
+func (g *GoAppDB) MoveChatFromPendingToActive(chatID, cseID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// First, verify that the chat is in pending status and assigned to this CSE
+	var chat model.Chat
+	chatFilter := bson.D{{Key: "_id", Value: chatID}}
+
+	err := User(g.DB, "chats").FindOne(ctx, chatFilter).Decode(&chat)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error finding chat: %v", err)
+		return err
+	}
+
+	if chat.Status != "pending" {
+		return errors.New("chat is not in pending status")
+	}
+
+	if chat.CseID != cseID {
+		return errors.New("chat is not assigned to this CSE")
+	}
+
+	// Update chat status to active
+	chatUpdate := bson.D{
+		{Key: "$set", Value: bson.D{{Key: "status", Value: "active"}}},
+	}
+
+	_, err = User(g.DB, "chats").UpdateOne(ctx, chatFilter, chatUpdate)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating chat status: %v", err)
+		return err
+	}
+
+	// Update CSE's collections - remove from pending, add to active
+	cseFilter := bson.D{{Key: "_id", Value: cseID}}
+	cseUpdate := bson.D{
+		{Key: "$pull", Value: bson.D{{Key: "pending_chats", Value: chatID}}},
+		{Key: "$push", Value: bson.D{{Key: "active_chats", Value: chatID}}},
+		{Key: "$inc", Value: bson.D{
+			{Key: "pending_chats_count", Value: -1},
+			{Key: "active_chats_count", Value: 1},
+		}},
+	}
+
+	_, err = User(g.DB, "cses").UpdateOne(ctx, cseFilter, cseUpdate)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating CSE collections: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+func (g *GoAppDB) CloseChat(chatID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// First, get the chat to check its current status and CSE assignment
+	var chat model.Chat
+	chatFilter := bson.D{{Key: "_id", Value: chatID}}
+
+	err := User(g.DB, "chats").FindOne(ctx, chatFilter).Decode(&chat)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error finding chat: %v", err)
+		return err
+	}
+
+	if chat.Status == "closed" {
+		return errors.New("chat is already closed")
+	}
+
+	// Update chat status to closed and set close date
+	chatUpdate := bson.D{
+		{Key: "$set", Value: bson.D{
+			{Key: "status", Value: "closed"},
+			{Key: "date_closed", Value: time.Now()},
+		}},
+	}
+
+	_, err = User(g.DB, "chats").UpdateOne(ctx, chatFilter, chatUpdate)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating chat status: %v", err)
+		return err
+	}
+
+	// If a CSE is assigned, update their collections
+	if !chat.CseID.IsZero() {
+		cseFilter := bson.D{{Key: "_id", Value: chat.CseID}}
+		var cseUpdate bson.D
+
+		if chat.Status == "active" {
+			cseUpdate = bson.D{
+				{Key: "$pull", Value: bson.D{{Key: "active_chats", Value: chatID}}},
+				{Key: "$push", Value: bson.D{{Key: "closed_chats", Value: chatID}}},
+				{Key: "$inc", Value: bson.D{{Key: "active_chats_count", Value: -1}}},
+			}
+		} else if chat.Status == "pending" {
+			cseUpdate = bson.D{
+				{Key: "$pull", Value: bson.D{{Key: "pending_chats", Value: chatID}}},
+				{Key: "$push", Value: bson.D{{Key: "closed_chats", Value: chatID}}},
+				{Key: "$inc", Value: bson.D{{Key: "pending_chats_count", Value: -1}}},
+			}
+		}
+
+		_, err = User(g.DB, "cses").UpdateOne(ctx, cseFilter, cseUpdate)
+		if err != nil {
+			g.App.ErrorLogger.Printf("Error updating CSE collections: %v", err)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (g *GoAppDB) ReopenChat(chatID, userID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// First, get the chat to check its current status and ownership
+	var chat model.Chat
+	chatFilter := bson.D{{Key: "_id", Value: chatID}}
+
+	err := User(g.DB, "chats").FindOne(ctx, chatFilter).Decode(&chat)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error finding chat: %v", err)
+		return err
+	}
+
+	fmt.Print("Inside the query to reopen the chat. chat :", chat)
+
+	// Verify that the user owns this chat
+	if chat.UserID != userID {
+		return errors.New("you don't have permission to reopen this chat")
+	}
+
+	// Verify that the chat is closed
+	if chat.Status != "closed" {
+		return errors.New("chat is not closed")
+	}
+
+	// If a CSE was previously assigned, update their collections
+	if !chat.CseID.IsZero() {
+		cseFilter := bson.D{{Key: "_id", Value: chat.CseID}}
+		cseUpdate := bson.D{
+			{Key: "$pull", Value: bson.D{{Key: "closed_chats", Value: chatID}}},
+		}
+
+		_, err = User(g.DB, "cses").UpdateOne(ctx, cseFilter, cseUpdate)
+		if err != nil {
+			g.App.ErrorLogger.Printf("Error updating CSE collections: %v", err)
+			// Continue anyway
+		}
+	}
+
+	// Set the chat back to waiting status and clear CSE assignment
+	chatUpdate := bson.D{
+		{Key: "$set", Value: bson.D{
+			{Key: "status", Value: "waiting"},
+			{Key: "last_message_time", Value: time.Now()},
+			{Key: "date_closed", Value: time.Time{}}, // Clear the close date
+		}},
+		{Key: "$unset", Value: bson.D{{Key: "cse_id", Value: ""}}},
+	}
+
+	_, err = User(g.DB, "chats").UpdateOne(ctx, chatFilter, chatUpdate)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error updating chat status: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// In query.go
+func (g *GoAppDB) CloseIdleChats() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// Find chats that have been idle for more than 5 minutes
+	fiveMinutesAgo := time.Now().Add(-5 * time.Minute)
+
+	filter := bson.D{
+		{Key: "status", Value: bson.D{{Key: "$in", Value: bson.A{"active", "pending"}}}},
+		{Key: "last_message_time", Value: bson.D{{Key: "$lt", Value: fiveMinutesAgo}}},
+	}
+
+	cursor, err := User(g.DB, "chats").Find(ctx, filter)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Error finding idle chats: %v", err)
+		return err
+	}
+	defer cursor.Close(ctx)
+
+	var chats []model.Chat
+	if err = cursor.All(ctx, &chats); err != nil {
+		g.App.ErrorLogger.Printf("Error decoding chats: %v", err)
+		return err
+	}
+
+	if len(chats) > 0 {
+		g.App.InfoLogger.Printf("Found %d idle chats to close", len(chats))
+	}
+
+	// Close each idle chat
+	for _, chat := range chats {
+		err = g.CloseChat(chat.ID)
+		if err != nil {
+			g.App.ErrorLogger.Printf("Error closing idle chat %s: %v", chat.ID.Hex(), err)
+			// Continue with other chats
+		} else {
+			g.App.InfoLogger.Printf("Automatically closed idle chat %s", chat.ID.Hex())
+		}
+	}
+
+	return nil
+}
+
+// In database/query/query.go
+
+// CreateReview adds a new review to the database
+func (g *GoAppDB) CreateReview(review *model.Review) (*model.Review, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+	// Set review ID and creation time
+	review.ID = primitive.NewObjectID()
+	review.CreatedAt = time.Now()
+
+	fmt.Print("Review creation phase 1 in query : ", review)
+
+	_, err := User(g.DB, "reviews").InsertOne(ctx, review)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Failed to create review: %v", err)
+		return nil, err
+	}
+
+	fmt.Print("Review being created: ", review)
+
+	return review, nil
+}
+
+// UpdateProductWithReview updates a product with a new review and recalculates the overall rating
+func (g *GoAppDB) UpdateProductWithReview(productID primitive.ObjectID, review *model.Review) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	// First: Get the current product to calculate new rating
+	var product model.Product
+	filter := bson.M{"_id": productID}
+
+	err := User(g.DB, "product").FindOne(ctx, filter).Decode(&product)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Failed to find product for review update: %v", err)
+		return err
+	}
+
+	fmt.Print("Product updation phase 1 : ", product)
+
+	// Add the new review to the product's reviews array
+	update := bson.M{
+		"$push": bson.M{"reviews": review},
+		"$set":  bson.M{"updated_at": time.Now()},
+	}
+
+	// Calculate new overall rating
+	totalRating := 0
+	for _, r := range product.Reviews {
+		totalRating += r.Rating
+	}
+	totalRating += review.Rating
+	newRating := float32(totalRating) / float32(len(product.Reviews)+1)
+
+	fmt.Print("Product updation phase 2 : ", product)
+	fmt.Print("New rating : ", newRating)
+
+	// Add the new rating to the update
+	update["$set"].(bson.M)["overall_rating"] = newRating
+
+	_, err = User(g.DB, "product").UpdateOne(ctx, filter, update)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Failed to update product with review: %v", err)
+		return err
+	}
+
+	fmt.Print("Product updation phase 3 : ", product)
+
+	return nil
+}
+
+func (g *GoAppDB) UpdateOrderWithRated(orderID primitive.ObjectID) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": orderID}
+
+	update := bson.M{
+		"$set": bson.M{"rated": true},
+	}
+
+	_, err := User(g.DB, "orders").UpdateOne(ctx, filter, update)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Failed to update order with rated: %v", err)
+		return err
+	}
+
+	return nil
+}
+
+// GetReviewsByProductID returns all reviews for a specific product
+func (g *GoAppDB) GetReviewsByProductID(productID primitive.ObjectID) ([]model.Review, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	fmt.Print("Product ID : ", productID)
+
+	filter := bson.M{"product_id": productID}
+	cursor, err := User(g.DB, "reviews").Find(ctx, filter)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Failed to find reviews for product: %v", err)
+		return nil, err
+	}
+
+	var reviews []model.Review
+	if err = cursor.All(ctx, &reviews); err != nil {
+		g.App.ErrorLogger.Printf("Failed to decode reviews: %v", err)
+		return nil, err
+	}
+
+	fmt.Print("Reviews fetched : ", reviews)
+
+	return reviews, nil
+}
+
+// GetReviewsByCustomerID returns all reviews created by a specific customer
+func (g *GoAppDB) GetReviewsByCustomerID(customerID primitive.ObjectID) ([]model.Review, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	fmt.Print("Customer ID : ", customerID)
+
+	filter := bson.M{"customer_id": customerID}
+	cursor, err := User(g.DB, "reviews").Find(ctx, filter)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Failed to find reviews for customer: %v", err)
+		return nil, err
+	}
+
+	var reviews []model.Review
+	if err = cursor.All(ctx, &reviews); err != nil {
+		g.App.ErrorLogger.Printf("Failed to decode reviews: %v", err)
+		return nil, err
+	}
+
+	fmt.Print("Reviews fetched : ", reviews)
+
+	return reviews, nil
+}
+
+// DeleteReview removes a review from both the reviews collection and updates the product
+// func (g *GoAppDB) DeleteReview(reviewID primitive.ObjectID) error {
+// 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+// 	defer cancel()
+
+// 	reviewsCollection := g.DB.Database("YourDBName").Collection("reviews")
+// 	productsCollection := g.DB.Database("YourDBName").Collection("products")
+
+// 	// First get the review to know which product to update
+// 	var review model.Review
+// 	err := reviewsCollection.FindOne(ctx, bson.M{"_id": reviewID}).Decode(&review)
+// 	if err != nil {
+// 		g.App.ErrorLogger.Printf("Failed to find review to delete: %v", err)
+// 		return err
+// 	}
+
+// 	// Delete the review
+// 	_, err = reviewsCollection.DeleteOne(ctx, bson.M{"_id": reviewID})
+// 	if err != nil {
+// 		g.App.ErrorLogger.Printf("Failed to delete review: %v", err)
+// 		return err
+// 	}
+
+// 	// Update the product by removing the review and recalculating rating
+// 	filter := bson.M{"_id": review.ProductID}
+// 	update := bson.M{
+// 		"$pull": bson.M{"reviews": bson.M{"_id": reviewID}},
+// 		"$set":  bson.M{"updated_at": time.Now()},
+// 	}
+
+// 	// Get the product to recalculate rating
+// 	var product model.Product
+// 	err = productsCollection.FindOne(ctx, filter).Decode(&product)
+// 	if err != nil {
+// 		g.App.ErrorLogger.Printf("Failed to find product for review removal: %v", err)
+// 		return err
+// 	}
+
+// 	// Calculate new rating without the deleted review
+// 	totalRating := 0
+// 	var updatedReviews []model.Review
+// 	for _, r := range product.Reviews {
+// 		if r.ID != reviewID {
+// 			totalRating += r.Rating
+// 			updatedReviews = append(updatedReviews, r)
+// 		}
+// 	}
+
+// 	var newRating float32
+// 	if len(updatedReviews) > 0 {
+// 		newRating = float32(totalRating) / float32(len(updatedReviews))
+// 	} else {
+// 		newRating = 0 // No reviews, so rating is 0
+// 	}
+
+// 	update["$set"].(bson.M)["overall_rating"] = newRating
+
+// 	_, err = productsCollection.UpdateOne(ctx, filter, update)
+// 	if err != nil {
+// 		g.App.ErrorLogger.Printf("Failed to update product after review deletion: %v", err)
+// 		return err
+// 	}
+
+// 	return nil
+// }
+
+// In database/query/query.go
+
+// UpdateProductSummarizedReview updates just the summarized review field of a product
+func (g *GoAppDB) UpdateProductSummarizedReview(productID primitive.ObjectID, summarizedReview string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	filter := bson.M{"_id": productID}
+	update := bson.M{
+		"$set": bson.M{
+			"summarized_review": summarizedReview,
+			"updated_at":        time.Now(),
+		},
+	}
+
+	result, err := User(g.DB, "product").UpdateOne(ctx, filter, update)
+	if err != nil {
+		g.App.ErrorLogger.Printf("Failed to update product with summarized review: %v", err)
+		return err
+	}
+
+	fmt.Print("Result : ", result)
+
+	if result.MatchedCount == 0 {
+		return fmt.Errorf("no product found with ID %s", productID.Hex())
 	}
 
 	return nil

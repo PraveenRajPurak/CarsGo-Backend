@@ -1299,6 +1299,8 @@ func (ga *GoApp) Get_User_Orders() gin.HandlerFunc {
 
 		orders, err := ga.DB.GetUserOrders(userId)
 
+		fmt.Print("Orders(look for chat IDs) : ", orders)
+
 		if err != nil {
 			ga.App.ErrorLogger.Println("There is some problem in getting user orders : ", err)
 			_ = ctx.AbortWithError(http.StatusInternalServerError, gin.Error{Err: err})
@@ -1736,6 +1738,7 @@ func (ga *GoApp) CreateChat() gin.HandlerFunc {
 		chat.LastMessageTime, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
 		chat.Messages = []primitive.ObjectID{}
 		chat.Status = "waiting"
+
 		// Create the chat
 		chatID, err := ga.DB.CreateChat(chat)
 		if err != nil {
@@ -2030,9 +2033,369 @@ func (ga *GoApp) GetChatHistory() gin.HandlerFunc {
 		fmt.Print("Chat in phase 3: ", messages)
 
 		ctx.JSON(http.StatusOK, gin.H{
-			"chat_id":  chatID.Hex(),
-			"status":   chat.Status,
-			"messages": messages,
+			"chat_id":     chatID.Hex(),
+			"status":      chat.Status,
+			"messages":    messages,
+			"customer_id": chat.UserID,
+			"order_id":    chat.OrderID,
+			"cse_id":      chat.CseID,
+		})
+	}
+}
+
+// Move chat from pending to active (CSE only)
+func (ga *GoApp) MoveChatToActive() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var input struct {
+			ChatID string `json:"chat_id" binding:"required"`
+			CseID  string `json:"cse_id" binding:"required"`
+		}
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		chatID, err := primitive.ObjectIDFromHex(input.ChatID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID format"})
+			return
+		}
+
+		cseID, err := primitive.ObjectIDFromHex(input.CseID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid CSE ID format"})
+			return
+		}
+
+		// Move chat from pending to active
+		err = ga.DB.MoveChatFromPendingToActive(chatID, cseID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"message": "Chat moved to active successfully",
+		})
+	}
+}
+
+// Close chat (can be used by user)
+func (ga *GoApp) CloseChat() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var input struct {
+			ChatID string `json:"chat_id" binding:"required"`
+		}
+
+		fmt.Print("Chat in phase 1 in handler: ", input)
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		chatID, err := primitive.ObjectIDFromHex(input.ChatID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID format"})
+			return
+		}
+
+		// Get chat to verify access
+		chat, err := ga.DB.GetChatByID(chatID)
+		if err != nil {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "Chat not found"})
+			return
+		}
+
+		fmt.Print("Chat in phase 2: ", chat)
+
+		// Close the chat
+		err = ga.DB.CloseChat(chatID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		fmt.Print("Chat in phase 3: ", chat)
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"message": "Chat closed successfully",
+		})
+	}
+}
+
+// Call this function when the server starts, e.g., in main.go
+// goApp.StartIdleChatCloser(
+func (ga *GoApp) ReopenChat() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		var input struct {
+			ChatID string `json:"chat_id" binding:"required"`
+			UserID string `json:"user_id" binding:"required"`
+		}
+
+		fmt.Print("Phase 1, Inputs : ", input)
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		chatID, err := primitive.ObjectIDFromHex(input.ChatID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid chat ID format"})
+			return
+		}
+
+		userID, err := primitive.ObjectIDFromHex(input.UserID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID format"})
+			return
+		}
+
+		fmt.Print("Phase 2, reopening, ChatIDS", chatID, userID)
+
+		// Reopen the chat
+		err = ga.DB.ReopenChat(chatID, userID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		fmt.Print("Phase 3, reopening, hitting the goroutine.")
+		// Start the assignment process in a goroutine
+		go ga.AssignChatToCSE(chatID)
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"message": "Chat reopened successfully",
+		})
+	}
+}
+
+// In handler.go
+func (ga *GoApp) StartIdleChatCloser() {
+	ticker := time.NewTicker(1 * time.Minute)
+
+	go func() {
+		for range ticker.C {
+			err := ga.DB.CloseIdleChats()
+			if err != nil {
+				ga.App.ErrorLogger.Printf("Error in idle chat closer: %v", err)
+			} else {
+				ga.App.InfoLogger.Println("Checked for idle chats")
+			}
+		}
+	}()
+}
+
+// In handler/handler.go
+
+// CreateReview handles the creation of a new review
+func (ga *GoApp) CreateReview() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		// Extract user ID from the authenticated session
+
+		var reviewInput struct {
+			CustomerID string `json:"customer_id" binding:"required"`
+			ProductID  string `json:"product_id" binding:"required"`
+			Review     string `json:"review" binding:"required"`
+			Rating     int    `json:"rating" binding:"required,min=1,max=5"`
+			OrderID    string `json:"order_id" binding:"required"`
+		}
+
+		fmt.Print("Review in phase 1 in handler: ", reviewInput)
+
+		if err := ctx.ShouldBindJSON(&reviewInput); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		fmt.Print("Review in phase 2 in handler: ", reviewInput)
+		fmt.Print("Product ID : ", reviewInput.ProductID)
+		fmt.Print("Customer ID : ", reviewInput.CustomerID)
+		fmt.Print("Review Text : ", reviewInput.Review)
+		fmt.Print("Rating : ", reviewInput.Rating)
+		fmt.Print("Order ID : ", reviewInput.OrderID)
+
+		// Convert string ID to ObjectID
+		productObjID, err := primitive.ObjectIDFromHex(reviewInput.ProductID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
+			return
+		}
+
+		fmt.Print("Review in phase 2 in handler: Product ID : ", productObjID)
+
+		customerObjID, err := primitive.ObjectIDFromHex(reviewInput.CustomerID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid customer ID format"})
+			return
+		}
+
+		fmt.Print("Review in phase 2 in handler: Customer ID : ", customerObjID)
+
+		orderObjID, err := primitive.ObjectIDFromHex(reviewInput.OrderID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid order ID format"})
+			return
+		}
+
+		fmt.Print("Review in phase 2 in handler: Order ID : ", orderObjID)
+
+		// Create new review object
+		review := &model.Review{
+			ProductID:  productObjID,
+			Review:     reviewInput.Review,
+			Rating:     reviewInput.Rating,
+			CustomerID: customerObjID,
+			CreatedAt:  time.Now(),
+		}
+
+		fmt.Print("Review in phase 2 in handler: ", review)
+
+		// Save review to database
+		savedReview, err := ga.DB.CreateReview(review)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create review"})
+			return
+		}
+
+		fmt.Print("Review in phase 3 in handler: ", savedReview)
+
+		// Update product with the new review
+		err = ga.DB.UpdateProductWithReview(productObjID, savedReview)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product with review"})
+			return
+		}
+
+		err = ga.DB.UpdateOrderWithRated(orderObjID)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update order with rated value"})
+			return
+		}
+
+		ctx.JSON(http.StatusCreated, gin.H{
+			"message": "Review created successfully",
+			"review":  savedReview,
+		})
+	}
+}
+
+// GetProductReviews returns all reviews for a specific product
+func (ga *GoApp) GetProductReviews() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		productID := ctx.Param("productId")
+
+		fmt.Print("Product ID in handler: ", productID)
+
+		productObjID, err := primitive.ObjectIDFromHex(productID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
+			return
+		}
+
+		reviews, err := ga.DB.GetReviewsByProductID(productObjID)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch reviews"})
+			return
+		}
+
+		fmt.Print("Reviews in handler: ", reviews)
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"reviews": reviews,
+			"count":   len(reviews),
+		})
+	}
+}
+
+// GetUserReviews returns all reviews created by the currently authenticated user
+func (ga *GoApp) GetUserReviews() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+		customerID, exists := ctx.Get("customer_id")
+		if !exists {
+			ctx.JSON(http.StatusUnauthorized, gin.H{"error": "User not authenticated"})
+			return
+		}
+
+		customerObjID, err := primitive.ObjectIDFromHex(customerID.(string))
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid customer ID format"})
+			return
+		}
+
+		reviews, err := ga.DB.GetReviewsByCustomerID(customerObjID)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch user reviews"})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"reviews": reviews,
+			"count":   len(reviews),
+		})
+	}
+}
+
+// DeleteReview deletes a review (only by the review owner or admin)
+// func (ga *GoApp) DeleteReview() gin.HandlerFunc {
+//     return func(ctx *gin.Context) {
+//         reviewID := ctx.Param("reviewId")
+
+//         reviewObjID, err := primitive.ObjectIDFromHex(reviewID)
+//         if err != nil {
+//             ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid review ID format"})
+//             return
+//         }
+
+//         err = ga.DB.DeleteReview(reviewObjID)
+//         if err != nil {
+//             ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete review"})
+//             return
+//         }
+
+//         ctx.JSON(http.StatusOK, gin.H{
+//             "message": "Review deleted successfully",
+//         })
+//     }
+// }
+
+// In handler/handler.go
+
+// UpdateProductSummarizedReview updates a product with a summarized review
+func (ga *GoApp) UpdateProductSummarizedReview() gin.HandlerFunc {
+	return func(ctx *gin.Context) {
+
+		var input struct {
+			ProductID        string `json:"product_id" binding:"required"`
+			SummarizedReview string `json:"summarized_review" binding:"required"`
+		}
+
+		if err := ctx.ShouldBindJSON(&input); err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		fmt.Print("Input in handler: ", input)
+
+		// Convert string ID to ObjectID
+		productObjID, err := primitive.ObjectIDFromHex(input.ProductID)
+		if err != nil {
+			ctx.JSON(http.StatusBadRequest, gin.H{"error": "Invalid product ID format"})
+			return
+		}
+
+		// Update the product with the summarized review
+		err = ga.DB.UpdateProductSummarizedReview(productObjID, input.SummarizedReview)
+		if err != nil {
+			ctx.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update product with summarized review: " + err.Error()})
+			return
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"message":    "Product summarized review updated successfully",
+			"product_id": input.ProductID,
 		})
 	}
 }

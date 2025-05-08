@@ -66,4 +66,15 @@ type DBRepo interface {
 	AddMessage(message *model.Message) (primitive.ObjectID, error)
 	GetMessagesByChat(chatID primitive.ObjectID) ([]model.Message, error)
 	UpdateChatLastMessageTime(chatID primitive.ObjectID) error
+	MoveChatFromPendingToActive(chatID, cseID primitive.ObjectID) error
+	CloseChat(chatID primitive.ObjectID) error
+	ReopenChat(chatID, userID primitive.ObjectID) error
+	CloseIdleChats() error
+	CreateReview(review *model.Review) (*model.Review, error)
+	UpdateProductWithReview(productID primitive.ObjectID, review *model.Review) error
+	GetReviewsByProductID(productID primitive.ObjectID) ([]model.Review, error)
+	GetReviewsByCustomerID(customerID primitive.ObjectID) ([]model.Review, error)
+	UpdateOrderWithRated(orderID primitive.ObjectID) error
+	//DeleteReview(reviewID primitive.ObjectID) error
+	UpdateProductSummarizedReview(productID primitive.ObjectID, summarizedReview string) error
 }
